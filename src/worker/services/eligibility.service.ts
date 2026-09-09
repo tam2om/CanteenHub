@@ -12,6 +12,7 @@ import type { Employee, EligibilityResponse } from '../../shared/types/index.js'
 import { computeEligibility, type EligibilityContext } from '../domain/eligibility.js';
 import { getRosterEntry, getFutureEligibleShifts, getPublishedMenuDates } from '../repositories/roster.repo.js';
 import { getSetting, getTimezone } from './settings.service.js';
+import { getHolidayDateSet } from '../repositories/holidays.repo.js';
 import { getWeekday, type BusinessDate } from '../lib/datetime.js';
 
 const DEFAULT_WORKING_DAYS = [0, 1, 2, 3, 4]; // Sunday-Thursday
@@ -41,8 +42,10 @@ export async function loadEligibilityConfig(db: D1Database): Promise<Eligibility
     }
   }
 
-  // Holidays live in a dedicated table in a later phase; an empty set today.
-  const holidays = new Set<BusinessDate>();
+  // Real configured company holidays. The eligibility RULES are unchanged - the
+  // domain function already handled a holiday set and returned the HOLIDAY
+  // denial reason; until now it was simply always given an empty one.
+  const holidays = await getHolidayDateSet(db);
 
   return { workingDays, holidays, timezone };
 }

@@ -1,8 +1,8 @@
 /**
  * Test D1 adapter backed by node:sqlite.
  *
- * These are real integration tests: the actual `migrations/0001_initial_schema.sql`
- * is applied, real SQL runs, and the real Hono app handles real Request objects.
+ * These are real integration tests: every file in `migrations/` is applied in
+ * order, real SQL runs, and the real Hono app handles real Request objects.
  * Only the transport to SQLite is substituted, so route logic, middleware,
  * repository SQL, constraints and triggers are all genuinely exercised.
  *
@@ -15,13 +15,13 @@
  */
 
 import { DatabaseSync } from 'node:sqlite';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import type { D1Database } from '@cloudflare/workers-types';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const MIGRATION_PATH = path.resolve(here, '../../migrations/0001_initial_schema.sql');
+const MIGRATIONS_DIR = path.resolve(here, '../../migrations');
 
 type Row = Record<string, unknown>;
 
@@ -144,8 +144,17 @@ export function createTestDb(): TestD1Database {
   const sqlite = new DatabaseSync(':memory:');
   sqlite.exec('PRAGMA foreign_keys = ON;');
 
-  const migration = readFileSync(MIGRATION_PATH, 'utf8');
-  sqlite.exec(migration);
+  // Apply every migration in filename order, exactly as `wrangler d1 migrations
+  // apply` does. Reading the directory rather than naming one file means a new
+  // migration is picked up automatically and the tests can never silently run
+  // against a stale schema.
+  const migrationFiles = readdirSync(MIGRATIONS_DIR)
+    .filter((f) => f.endsWith('.sql'))
+    .sort();
+
+  for (const file of migrationFiles) {
+    sqlite.exec(readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8'));
+  }
 
   return new TestD1(sqlite) as unknown as TestD1Database;
 }

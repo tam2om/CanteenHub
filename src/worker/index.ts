@@ -13,6 +13,7 @@ import { employeeRoutes } from './routes/employee.js';
 import { menuRoutes } from './routes/menu.js';
 import { rosterRoutes } from './routes/roster.js';
 import { selectionRoutes } from './routes/selections.js';
+import { adminRoutes } from './routes/admin.js';
 import { sessionMiddleware } from './middleware/session.js';
 
 // Create the main application
@@ -71,6 +72,10 @@ app.route('/api/roster', rosterRoutes);
 
 // Selection routes
 app.route('/api/selections', selectionRoutes);
+
+// Admin routes (employees, password, settings, holidays).
+// The router applies requireAuth + requireRole to every endpoint it owns.
+app.route('/api/admin', adminRoutes);
 
 // 404 handler
 app.notFound((c) => {

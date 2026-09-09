@@ -253,6 +253,87 @@ export async function logSelectionOverride(
 }
 
 /**
+ * Create audit entry for an administrative password change.
+ *
+ * SECURITY: the plaintext password is never a parameter of this function, so it
+ * cannot reach the audit table even by mistake. Nor is the resulting hash
+ * recorded - a stored hash in an audit row is a credential sitting in a table
+ * that is deliberately never deleted. The audit answers who changed whose
+ * password, when, and how many sessions that revoked; the secret itself is not
+ * part of that answer.
+ */
+export async function logPasswordChange(
+  db: D1Database,
+  actorId: number,
+  targetEmployeeId: number,
+  targetAmcoId: string,
+  sessionsRevoked: number,
+  ipAddress: string | null = null
+): Promise<AuditLog> {
+  return logAudit(db, {
+    actorId,
+    action: 'ADMIN_SET_EMPLOYEE_PASSWORD',
+    entityType: 'EMPLOYEE',
+    entityId: targetEmployeeId,
+    beforeJson: null,
+    afterJson: JSON.stringify({
+      employee_id: targetEmployeeId,
+      amco_id: targetAmcoId,
+      password_changed: true,
+      sessions_revoked: sessionsRevoked,
+    }),
+    ipAddress
+  });
+}
+
+/**
+ * Create audit entry for an application setting change.
+ */
+export async function logSettingsChange(
+  db: D1Database,
+  actorId: number,
+  key: string,
+  beforeValue: string | null,
+  afterValue: string,
+  ipAddress: string | null = null
+): Promise<AuditLog> {
+  return logAudit(db, {
+    actorId,
+    action: 'UPDATE_SETTING',
+    entityType: 'SETTING',
+    entityId: null,
+    beforeJson: beforeValue === null ? null : JSON.stringify({ key, value: beforeValue }),
+    afterJson: JSON.stringify({ key, value: afterValue }),
+    ipAddress
+  });
+}
+
+/**
+ * Create audit entry for a holiday change.
+ */
+export async function logHolidayChange(
+  db: D1Database,
+  actorId: number,
+  holidayDate: string,
+  beforeJson: string | null,
+  afterJson: string | null,
+  action: 'CREATE' | 'UPDATE' | 'DELETE',
+  ipAddress: string | null = null
+): Promise<AuditLog> {
+  return logAudit(db, {
+    actorId,
+    action: `${action}_HOLIDAY`,
+    entityType: 'HOLIDAY',
+    entityId: null, // holidays are keyed by date, not by an integer id
+    beforeJson,
+    afterJson: afterJson
+      ? JSON.stringify({ holiday_date: holidayDate, holiday: JSON.parse(afterJson) })
+      : JSON.stringify({ holiday_date: holidayDate, holiday: null }),
+    ipAddress
+  });
+}
+
+/**
  * Create audit entry for employee change
  */
 export async function logEmployeeChange(

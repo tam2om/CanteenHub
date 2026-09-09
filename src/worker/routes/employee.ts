@@ -5,6 +5,7 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types/env.js';
 import { getEmployeeById } from '../db/employees.js';
+import { toPublicEmployee } from '../lib/employeeView.js';
 
 export const employeeRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -58,8 +59,10 @@ employeeRoutes.get('/:id', async (c) => {
     return c.json({ success: false, error: 'Employee not found' }, 404);
   }
   
+  // getEmployeeById does SELECT *, so the row carries password_hash. Strip it:
+  // returning the stored credential to any authenticated caller would be a leak.
   return c.json({
     success: true,
-    data: targetEmployee,
+    data: toPublicEmployee(targetEmployee),
   });
 });

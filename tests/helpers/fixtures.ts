@@ -7,6 +7,7 @@
 
 import type { D1Database } from '@cloudflare/workers-types';
 import { hashSessionToken } from '../../src/worker/lib/session.js';
+import { hashPassword } from '../../src/worker/lib/auth.js';
 import type { Env } from '../../src/worker/types/env.js';
 
 export const ROLE_EMPLOYEE = 1;
@@ -116,6 +117,43 @@ export async function setSetting(
     )
     .bind(key, value, valueType)
     .run();
+}
+
+/**
+ * Give an employee a real password, hashed with the application's own hashing
+ * implementation, so login tests exercise the genuine verification path.
+ */
+export async function setEmployeePasswordDirect(
+  db: D1Database,
+  employeeId: number,
+  plaintext: string
+): Promise<void> {
+  const hash = await hashPassword(plaintext);
+  await db
+    .prepare('UPDATE employees SET password_hash = ? WHERE id = ?')
+    .bind(hash, employeeId)
+    .run();
+}
+
+/**
+ * Push every seeded session's expiry far into the future.
+ *
+ * Tests that travel the clock forward (to exercise cutoff behaviour on a future
+ * meal date) would otherwise find their own session expired, because seeding
+ * computes `expires_at` from the real clock. This keeps the session valid so the
+ * test exercises the cutoff rule rather than session expiry.
+ */
+export async function extendAllSessions(db: D1Database, expiresAt = '2099-01-01T00:00:00.000Z'): Promise<void> {
+  await db.prepare('UPDATE sessions SET expires_at = ?').bind(expiresAt).run();
+}
+
+/** Count live sessions for an employee. */
+export async function countSessions(db: D1Database, employeeId: number): Promise<number> {
+  const row = await db
+    .prepare('SELECT COUNT(*) as n FROM sessions WHERE employee_id = ?')
+    .bind(employeeId)
+    .first<{ n: number }>();
+  return Number(row?.n ?? 0);
 }
 
 export async function countRows(db: D1Database, sql: string, ...binds: unknown[]): Promise<number> {
