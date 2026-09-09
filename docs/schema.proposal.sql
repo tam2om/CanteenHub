@@ -12,6 +12,16 @@
 --   concretely rather than in prose. On approval, it becomes the basis of
 --   migrations/0001_initial_schema.sql.
 --
+--   REVISED 2026-09-09 against the real source files. See
+--   docs/SOURCE-DATA-FINDINGS.md. Three changes came out of that review:
+--     * meal_type ('lunch'/'dinner') added to menus and selections, because a
+--       dinner service exists in the source data that the requirements never
+--       mentioned. Modelled now, feature deliberately not built (see §4.1 of
+--       the findings). lunch_selections is therefore named meal_selections.
+--     * menu_components gains 'side' and 'accompaniment'; the real lunch menu
+--       has FIVE component columns, not the three the requirements named.
+--     * menu_days is keyed on (meal_date, meal_type), not meal_date alone.
+--
 --   Conventions (rationale in ARCHITECTURE.md §3):
 --     * Calendar dates  -> TEXT 'YYYY-MM-DD', always an Asia/Amman date
 --     * Timestamps      -> TEXT ISO-8601 UTC, e.g. '2026-09-09T07:15:00Z'
@@ -31,6 +41,10 @@ CREATE TABLE employees (
   id                   INTEGER PRIMARY KEY AUTOINCREMENT,
   amco_id              TEXT    NOT NULL UNIQUE,          -- business key from HR
   full_name            TEXT    NOT NULL,
+  -- Free text from the workbook. The source data contains stray leading and
+  -- trailing whitespace ("Maintenance  ", " Fleet &Transportation  "), so the
+  -- importer must trim and collapse whitespace or GROUP BY department will
+  -- produce duplicate-looking report rows.
   department           TEXT,
   section              TEXT,
 
@@ -99,7 +113,12 @@ CREATE INDEX idx_sessions_expires  ON sessions (expires_at);   -- nightly purge
 
 CREATE TABLE menu_days (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  meal_date    TEXT    NOT NULL UNIQUE,                  -- 'YYYY-MM-DD'
+  meal_date    TEXT    NOT NULL,                         -- 'YYYY-MM-DD'
+  -- Dinner is modelled but NOT built in phase 1. Every row written by the
+  -- lunch feature is 'lunch'. See docs/SOURCE-DATA-FINDINGS.md §4.1 for why
+  -- the dimension is added now rather than migrated in later.
+  meal_type    TEXT    NOT NULL DEFAULT 'lunch'
+               CHECK (meal_type IN ('lunch','dinner')),
   status       TEXT    NOT NULL DEFAULT 'draft'
                CHECK (status IN ('draft','published')),
   published_at TEXT,
@@ -109,10 +128,11 @@ CREATE TABLE menu_days (
   created_at   TEXT NOT NULL,
   updated_at   TEXT NOT NULL,
   created_by   INTEGER REFERENCES employees(id) ON DELETE RESTRICT,
-  updated_by   INTEGER REFERENCES employees(id) ON DELETE RESTRICT
+  updated_by   INTEGER REFERENCES employees(id) ON DELETE RESTRICT,
+  UNIQUE (meal_date, meal_type)
 );
 
-CREATE INDEX idx_menu_days_date_status ON menu_days (meal_date, status);
+CREATE INDEX idx_menu_days_date_status ON menu_days (meal_date, meal_type, status);
 
 -- Exactly two options per day, enforced by the database rather than by hope.
 CREATE TABLE menu_options (
@@ -126,15 +146,30 @@ CREATE TABLE menu_options (
   UNIQUE (menu_day_id, option_number)
 );
 
--- Informational accompaniments: condiment, beverage, dessert/fruit, etc.
--- These are NOT employee choices. Normalized so a new component type is a
--- new row, not a schema migration.
+-- Informational accompaniments. These are NOT employee choices.
+--
+-- The real lunch menu has FIVE such columns:
+--   'Option Meal 1'    -> 'salad'         (Tahina Salad, Rocca & Onions, ...)
+--   'Option Meal 2'    -> 'side'          (Youghurt / Yoghurt)
+--   'Condiment'        -> 'condiment'     (Pickles, Dagoos)
+--   'Beverage'         -> 'beverage'      (Cola or Juice or Water)
+--   'Dessert / Fruits' -> 'dessert'       (Seasonal fruit, Warbat, Arabic Sweet)
+--
+-- WARNING: despite their names, 'Option Meal 1' and 'Option Meal 2' are NOT
+-- selectable options. They are accompaniments served with whichever main the
+-- employee chose. The employee's choice is Option 1 vs Option 2 only.
+--
+-- The dinner menu contributes 'accompaniment' and 'beverage'.
+--
+-- Normalizing this (rather than one wide column per component) is what let the
+-- discovery of two extra component types land as data instead of a migration.
 CREATE TABLE menu_components (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   menu_day_id    INTEGER NOT NULL REFERENCES menu_days(id) ON DELETE CASCADE,
   component_type TEXT    NOT NULL
-                 CHECK (component_type IN ('condiment','beverage','dessert',
-                                           'salad','soup','bread','other')),
+                 CHECK (component_type IN ('salad','side','condiment','beverage',
+                                           'dessert','accompaniment','soup',
+                                           'bread','other')),
   name           TEXT    NOT NULL,
   sort_order     INTEGER NOT NULL DEFAULT 0,
   created_at     TEXT NOT NULL
@@ -147,6 +182,11 @@ CREATE INDEX idx_menu_components_day ON menu_components (menu_day_id, sort_order
 -- ---------------------------------------------------------------------------
 -- One row per SHIFT employee per day. Long form, not the wide month layout of
 -- the source workbook — the pivot happens in the browser at import time.
+--
+-- The source sheet is 'Shifts roster': code | month | year | 1 | 2 | ... | 31
+-- so work_date is COMPOSED from (year, month, day-column-index) rather than
+-- parsed from a header. There are always 31 day columns regardless of month
+-- length; a populated day-31 cell in a 30-day month is a validation error.
 --
 -- CRITICAL: the ABSENCE of a row means "roster not published for this date",
 -- NOT "off". These are different outcomes and are reported differently.
@@ -198,17 +238,19 @@ CREATE TABLE holidays (
 );
 
 -- ---------------------------------------------------------------------------
--- 5. LUNCH SELECTIONS  (ARCHITECTURE.md §10)
+-- 5. MEAL SELECTIONS  (ARCHITECTURE.md §10)
 -- ---------------------------------------------------------------------------
 -- NOTE THE ABSENCE OF ANY FOREIGN KEY TO menu_days / menu_options.
 -- A selection references the SLOT ('option_1' / 'option_2' / 'no_preference'),
 -- never a menu row. This is what makes "a menu re-import cannot destroy
 -- selections" true by construction rather than by careful coding.
 
-CREATE TABLE lunch_selections (
+CREATE TABLE meal_selections (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   employee_id     INTEGER NOT NULL REFERENCES employees(id) ON DELETE RESTRICT,
   meal_date       TEXT    NOT NULL,                      -- 'YYYY-MM-DD'
+  meal_type       TEXT    NOT NULL DEFAULT 'lunch'
+                  CHECK (meal_type IN ('lunch','dinner')),
   choice          TEXT    NOT NULL
                   CHECK (choice IN ('option_1','option_2','no_preference')),
   selected_at     TEXT    NOT NULL,
@@ -218,21 +260,23 @@ CREATE TABLE lunch_selections (
   override_reason TEXT,                                  -- required when source='admin_override'
   created_at      TEXT NOT NULL,
   updated_at      TEXT NOT NULL,
-  UNIQUE (employee_id, meal_date),
+  UNIQUE (employee_id, meal_date, meal_type),
   CHECK (source <> 'admin_override' OR override_reason IS NOT NULL)
 );
 
 -- Drives the daily portion counts; without this the report is a full scan.
-CREATE INDEX idx_selections_date        ON lunch_selections (meal_date);
-CREATE INDEX idx_selections_date_choice ON lunch_selections (meal_date, choice);
-CREATE INDEX idx_selections_emp_date    ON lunch_selections (employee_id, meal_date);
+CREATE INDEX idx_selections_date        ON meal_selections (meal_date, meal_type);
+CREATE INDEX idx_selections_date_choice ON meal_selections (meal_date, meal_type, choice);
+CREATE INDEX idx_selections_emp_date    ON meal_selections (employee_id, meal_date);
 
 -- Append-only. Written in the SAME batch() as the selection change, so the
 -- two can never diverge.
-CREATE TABLE lunch_selection_history (
+CREATE TABLE meal_selection_history (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   employee_id     INTEGER NOT NULL REFERENCES employees(id) ON DELETE RESTRICT,
   meal_date       TEXT    NOT NULL,
+  meal_type       TEXT    NOT NULL DEFAULT 'lunch'
+                  CHECK (meal_type IN ('lunch','dinner')),
   previous_choice TEXT,                                  -- NULL on first selection
   new_choice      TEXT    NOT NULL,
   changed_at      TEXT    NOT NULL,
@@ -243,8 +287,8 @@ CREATE TABLE lunch_selection_history (
   ip_address      TEXT
 );
 
-CREATE INDEX idx_sel_hist_emp_date ON lunch_selection_history (employee_id, meal_date);
-CREATE INDEX idx_sel_hist_date     ON lunch_selection_history (meal_date, changed_at);
+CREATE INDEX idx_sel_hist_emp_date ON meal_selection_history (employee_id, meal_date);
+CREATE INDEX idx_sel_hist_date     ON meal_selection_history (meal_date, changed_at);
 
 -- ---------------------------------------------------------------------------
 -- 6. SETTINGS  (ARCHITECTURE.md §18)
@@ -364,7 +408,9 @@ CREATE INDEX idx_audit_actor   ON audit_log (actor_employee_id, created_at DESC)
 -- caterer was paid against.
 
 CREATE TABLE daily_report_snapshots (
-  meal_date              TEXT PRIMARY KEY,               -- 'YYYY-MM-DD'
+  meal_date              TEXT NOT NULL,                  -- 'YYYY-MM-DD'
+  meal_type              TEXT NOT NULL DEFAULT 'lunch'
+                         CHECK (meal_type IN ('lunch','dinner')),
   option_1_count         INTEGER NOT NULL,
   option_2_count         INTEGER NOT NULL,
   no_preference_count    INTEGER NOT NULL,
@@ -375,7 +421,8 @@ CREATE TABLE daily_report_snapshots (
   department_breakdown   TEXT,                           -- JSON
   menu_snapshot          TEXT,                           -- JSON: option + component text as published
   generated_at           TEXT NOT NULL,
-  generated_by           TEXT NOT NULL DEFAULT 'cron'
+  generated_by           TEXT NOT NULL DEFAULT 'cron',
+  PRIMARY KEY (meal_date, meal_type)
 );
 
 -- ============================================================================

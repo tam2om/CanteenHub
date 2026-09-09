@@ -17,6 +17,7 @@ awaiting review and approval before any implementation begins.
 | Document | Contents |
 |---|---|
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | The full Phase 0 proposal — 22 sections, an Architecture Decision Summary, and Open Questions. |
+| [`docs/SOURCE-DATA-FINDINGS.md`](docs/SOURCE-DATA-FINDINGS.md) | What the actual source files turned out to contain, and what changed in the architecture as a result. |
 | [`docs/schema.proposal.sql`](docs/schema.proposal.sql) | The proposed D1 schema, as a review document. **Not a migration** — it lives in `docs/` so it cannot be applied accidentally. |
 
 ---
@@ -57,13 +58,22 @@ before Phase 1 can start.
 
 ## Three things needed before implementation starts
 
-1. **The source workbooks.** The employee file, the September 2026 shift roster,
-   and the September 2026 menu are referenced in the requirements but are not in
-   this repository. Column mappings cannot be finalized without them.
-2. **Answers to the Open Questions** at the end of the architecture document —
-   in particular the real cutoff time and whether night-shift employees need a
-   different one.
+1. **Is dinner in scope?** A complete 30-day dinner menu was supplied alongside
+   the lunch one, and the requirements never mention dinner — yet Night-shift
+   employees are meal eligible and are unlikely to be on site for lunch. If Day
+   shift eats lunch and Night shift eats dinner, the eligibility model changes
+   materially. The architecture models the dimension but builds no dinner
+   feature, so answering this now is free and answering it late is expensive.
+   (Open Question 8.)
+2. **The real cutoff time**, and whether Night shift needs a different one.
+   Together with (1) this determines the eligibility model, which everything
+   else is built on. (Open Question 4.)
 3. **Explicit sign-off on the password hashing decision** (§15.2). Cloudflare's
    platform caps PBKDF2 at 100,000 iterations, below current OWASP guidance.
    The proposal accepts this with compensating controls, but it should be an
    acknowledged decision rather than a discovered one.
+
+Helpful but not blocking: **the menu *source workbook*.** The menus arrived as
+PDF exports of an Excel file; with the workbook the menu importer is
+straightforward, without it menu entry is manual (~an hour a month). See Open
+Question 1.
