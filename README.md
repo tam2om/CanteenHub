@@ -2,68 +2,118 @@
 
 **Employee Meal Selection & Canteen Management System**
 
-An internal web application for daily lunch selection and canteen administration,
-built to run entirely on Cloudflare (Workers, D1, R2).
+CanteenHub is a standalone internal web application for managing employee meal selections and canteen operations.
 
----
+## Overview
 
-## Current status: Phase 0 — Discovery & Architecture
+The company provides meals to employees. For lunch, two meal options are provided each day. Employees who are eligible for a meal must log in and select their preference:
+- Option 1
+- Option 2
+- No Preference
 
-**No application code. No database tables. No dependencies installed.**
+The system determines meal eligibility based on employee roster type and daily shift assignments.
 
-This repository currently contains only the architecture proposal, which is
-awaiting review and approval before any implementation begins.
+## Employee Roster Types
 
-| Document | Contents |
-|---|---|
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | The full Phase 0 proposal — 22 sections, an Architecture Decision Summary, and Open Questions. |
-| [`docs/schema.proposal.sql`](docs/schema.proposal.sql) | The proposed D1 schema, as a review document. **Not a migration** — it lives in `docs/` so it cannot be applied accidentally. |
+### Regular
+Regular employees work Sunday through Thursday and are meal eligible on those days.
+- Sunday–Thursday: Meal eligible
+- Friday–Saturday: Not meal eligible
 
----
+### Shift
+Shift employees are controlled by their daily shift roster.
+- Day shift: Meal eligible
+- Night shift: Meal eligible
+- Off: Not meal eligible
 
-## What the system does
+### Amman HQ
+Employees whose roster type is "Amman HQ" do not receive company meals. They can log in but cannot select meals.
 
-The company serves two lunch options each day. Employees who are eligible log
-in and choose **Option 1**, **Option 2**, or **No Preference**, so the caterer
-knows exactly how many portions of each to prepare and the administrator knows
-who chose what.
+## Technology Stack
 
-Eligibility is driven by the employee's roster type:
+- **Frontend**: React + TypeScript + Vite
+- **Backend**: Cloudflare Workers (Hono framework)
+- **Database**: Cloudflare D1 (SQLite)
+- **Storage**: Cloudflare R2 (for Excel imports)
+- **Hosting**: Cloudflare Pages/Workers
 
-| Roster type | Eligibility rule |
-|---|---|
-| **Regular** | Sunday–Thursday. Not eligible Friday or Saturday. |
-| **Shift** | Follows the daily shift roster: **Day** and **Night** are both eligible; **Off** is not. |
-| **Amman HQ** | Never receives a company meal. Can still log in; cannot select. |
+## Project Structure
 
-Ineligible employees are shown a plain-language reason and, where it can be
-determined, the next date on which they can select.
+```
+canteenhub/
+├── src/
+│   ├── frontend/          # React frontend application
+│   ├── worker/            # Cloudflare Worker API
+│   └── shared/            # Shared types between frontend and worker
+├── migrations/            # D1 database migrations
+├── tests/                 # Unit and integration tests
+├── docs/                  # Documentation
+└── public/                # Static assets
+```
 
----
+## Development
 
-## Reading the proposal
+### Prerequisites
 
-If you are reviewing and have limited time, the two sections that carry the most
-consequence are:
+- Node.js 18+
+- npm or pnpm
+- Cloudflare account with Wrangler CLI installed
 
-- **§12 Eligibility calculation** — the roster-type branching that everything else depends on.
-- **§11 Import and audit model** — how Excel imports are prevented from destroying existing selections.
+### Local Setup
 
-The **Architecture Decision Summary** at the end lists all 26 recommended
-decisions in one place, followed by the **Open Questions** that need answers
-before Phase 1 can start.
+```bash
+# Install dependencies
+npm install
 
----
+# Create local D1 database
+wrangler d1 create canteenhub-local
 
-## Three things needed before implementation starts
+# Update wrangler.toml with the database ID
 
-1. **The source workbooks.** The employee file, the September 2026 shift roster,
-   and the September 2026 menu are referenced in the requirements but are not in
-   this repository. Column mappings cannot be finalized without them.
-2. **Answers to the Open Questions** at the end of the architecture document —
-   in particular the real cutoff time and whether night-shift employees need a
-   different one.
-3. **Explicit sign-off on the password hashing decision** (§15.2). Cloudflare's
-   platform caps PBKDF2 at 100,000 iterations, below current OWASP guidance.
-   The proposal accepts this with compensating controls, but it should be an
-   acknowledged decision rather than a discovered one.
+# Run migrations
+wrangler d1 execute canteenhub-local --local --file=migrations/0001_initial_schema.sql
+
+# Start development server
+npm run dev
+```
+
+### Testing
+
+```bash
+# Run type checking
+npm run typecheck
+
+# Run linting
+npm run lint
+
+# Run tests
+npm test
+```
+
+### Building
+
+```bash
+# Build frontend
+npm run build:frontend
+
+# Build worker
+npm run build:worker
+```
+
+## Deployment
+
+See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for deployment instructions.
+
+## Documentation
+
+- [Architecture](docs/ARCHITECTURE.md)
+- [Development Guide](docs/DEVELOPMENT.md)
+- [Deployment Guide](docs/DEPLOYMENT.md)
+- [Database Schema](docs/DATABASE.md)
+- [Business Rules](docs/BUSINESS-RULES.md)
+- [Eligibility Engine](docs/ELIGIBILITY.md)
+- [API Documentation](docs/API.md)
+
+## License
+
+Internal company use only.
