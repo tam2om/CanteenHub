@@ -1,0 +1,24 @@
+# CanteenHub Worker Configuration
+# Development configuration (local)
+name = "canteenhub-local"
+main = "src/worker/index.ts"
+compatibility_date = "2024-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+# D1 Database binding (local)
+[[d1_databases]]
+binding = "DB"
+database_name = "canteenhub-local"
+database_id = "local-dev"
+
+# Environment variables (do NOT put secrets here)
+[vars]
+ENVIRONMENT = "local"
+FRONTEND_URL = "http://localhost:5173"
+
+# Production overrides
+[env.production]
+name = "canteenhub-prod"
+
+[env.production.vars]
+ENVIRONMENT = "production"
