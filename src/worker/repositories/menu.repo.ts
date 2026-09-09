@@ -6,6 +6,20 @@
 import type { D1Database } from '@cloudflare/workers-types';
 import type { MenuDay, MenuOption, MenuComponent, MenuStatus, ComponentType, MenuDayWithDetails } from '../../shared/types/index.js';
 
+export interface MenuOptionMutationResult {
+  option: MenuOption;
+  beforeJson: string | null;
+  afterJson: string;
+  action: 'CREATE' | 'UPDATE';
+}
+
+export interface MenuComponentMutationResult {
+  component: MenuComponent;
+  beforeJson: string | null;
+  afterJson: string;
+  action: 'CREATE' | 'UPDATE';
+}
+
 export interface MenuMutationResult {
   menuDay: MenuDay;
   beforeJson: string | null;
@@ -30,6 +44,22 @@ export async function getMenuDayByDate(
 /**
  * Get full menu details (day + options + components) by date
  */
+/**
+ * Get a menu day by its primary key. Used by mutation routes that must record
+ * the owning day's date in the audit trail.
+ */
+export async function getMenuDayById(
+  db: D1Database,
+  menuDayId: number
+): Promise<MenuDay | null> {
+  const result = await db
+    .prepare('SELECT * FROM menu_days WHERE id = ?')
+    .bind(menuDayId)
+    .first<MenuDay>();
+
+  return result || null;
+}
+
 export async function getFullMenuByDate(
   db: D1Database,
   mealDate: string
@@ -161,7 +191,17 @@ export async function upsertMenuOption(
   optionNumber: 1 | 2,
   name: string,
   description: string | null = null
-): Promise<MenuOption> {
+): Promise<MenuOptionMutationResult> {
+  // Capture the pre-mutation state so the caller can write a truthful audit
+  // record. Reading it here (rather than in the route) keeps the before/after
+  // pair atomic with respect to the write.
+  const existing = await db
+    .prepare('SELECT * FROM menu_options WHERE menu_day_id = ? AND option_number = ?')
+    .bind(menuDayId, optionNumber)
+    .first<MenuOption>();
+
+  const beforeJson = existing ? JSON.stringify(existing) : null;
+
   await db
     .prepare(`
       INSERT INTO menu_options (menu_day_id, option_number, name, description)
@@ -181,8 +221,13 @@ export async function upsertMenuOption(
   if (!result) {
     throw new Error('Failed to retrieve created/updated menu option');
   }
-  
-  return result;
+
+  return {
+    option: result,
+    beforeJson,
+    afterJson: JSON.stringify(result),
+    action: existing ? 'UPDATE' : 'CREATE'
+  };
 }
 
 /**
@@ -194,7 +239,7 @@ export async function addMenuComponent(
   componentType: ComponentType,
   name: string,
   sortOrder: number = 0
-): Promise<MenuComponent> {
+): Promise<MenuComponentMutationResult> {
   await db
     .prepare(`
       INSERT INTO menu_components (menu_day_id, component_type, name, sort_order)
@@ -202,17 +247,71 @@ export async function addMenuComponent(
     `)
     .bind(menuDayId, componentType, name, sortOrder)
     .run();
-  
+
   const result = await db
     .prepare('SELECT * FROM menu_components WHERE menu_day_id = ? AND id = last_insert_rowid()')
     .bind(menuDayId)
     .first<MenuComponent>();
-  
+
   if (!result) {
     throw new Error('Failed to retrieve created menu component');
   }
-  
-  return result;
+
+  return {
+    component: result,
+    beforeJson: null,
+    afterJson: JSON.stringify(result),
+    action: 'CREATE'
+  };
+}
+
+/**
+ * Update an existing menu component in place, returning before/after for audit.
+ * Returns null when the component does not exist or belongs to another menu day.
+ */
+export async function updateMenuComponent(
+  db: D1Database,
+  menuDayId: number,
+  componentId: number,
+  componentType: ComponentType,
+  name: string,
+  sortOrder: number = 0
+): Promise<MenuComponentMutationResult | null> {
+  const existing = await db
+    .prepare('SELECT * FROM menu_components WHERE id = ? AND menu_day_id = ?')
+    .bind(componentId, menuDayId)
+    .first<MenuComponent>();
+
+  if (!existing) {
+    return null;
+  }
+
+  const beforeJson = JSON.stringify(existing);
+
+  await db
+    .prepare(`
+      UPDATE menu_components
+      SET component_type = ?, name = ?, sort_order = ?
+      WHERE id = ? AND menu_day_id = ?
+    `)
+    .bind(componentType, name, sortOrder, componentId, menuDayId)
+    .run();
+
+  const result = await db
+    .prepare('SELECT * FROM menu_components WHERE id = ? AND menu_day_id = ?')
+    .bind(componentId, menuDayId)
+    .first<MenuComponent>();
+
+  if (!result) {
+    throw new Error('Failed to retrieve updated menu component');
+  }
+
+  return {
+    component: result,
+    beforeJson,
+    afterJson: JSON.stringify(result),
+    action: 'UPDATE'
+  };
 }
 
 /**

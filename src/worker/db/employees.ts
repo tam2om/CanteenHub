@@ -89,7 +89,7 @@ export async function updateEmployee(
   }>
 ): Promise<EmployeeDB | null> {
   const updates: string[] = [];
-  const binds: any[] = [];
+  const binds: Array<string | number | null> = [];
   
   if (data.full_name !== undefined) {
     updates.push('full_name = ?');
@@ -162,8 +162,8 @@ export async function listEmployees(
   const pageSize = options.pageSize ?? 20;
   const offset = (page - 1) * pageSize;
   
-  let whereClauses: string[] = [];
-  let binds: any[] = [];
+  const whereClauses: string[] = [];
+  const binds: Array<string | number | null> = [];
   
   if (options.search) {
     whereClauses.push('(full_name LIKE ? OR amco_id LIKE ? OR department LIKE ?)');

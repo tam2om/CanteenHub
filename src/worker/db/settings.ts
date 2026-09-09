@@ -66,7 +66,7 @@ export async function getAppSettings(db: D1Database): Promise<AppSettings> {
 export async function updateSetting(
   db: D1Database,
   key: string,
-  value: any,
+  value: unknown,
   valueType: 'string' | 'number' | 'boolean' | 'json' | 'time',
   updatedBy: number | null = null
 ): Promise<SettingDB | null> {

@@ -7,9 +7,17 @@
  * - Shift employees: Day/Night eligible, Off not eligible, missing roster = not eligible
  * - Amman HQ: Never eligible
  * - Inactive employees: Never eligible
+ *
+ * This module is PURE: no database access, no clock reads, no I/O. It therefore
+ * cannot know which future dates have published menus or rostered shifts, so it
+ * always returns `nextEligibleDate: null`. That field is populated by
+ * eligibility.service.ts from real menu and roster data. Computing it here would
+ * require guessing forward over the calendar, which is exactly the arbitrary
+ * search horizon this design removes.
  */
 
-import type { Employee, RosterEntry, EligibilityResponse, EligibilityReason, EligibilityDenialReason, ShiftValue } from '../../shared/types/index.js';
+import type { Employee, RosterEntry, EligibilityResponse } from '../../shared/types/index.js';
+import { getWeekday } from '../lib/datetime.js';
 
 export interface EligibilityContext {
   employee: Employee;
@@ -51,7 +59,7 @@ export function computeEligibility(context: EligibilityContext): EligibilityResp
       eligible: false,
       reason: 'HOLIDAY',
       rosterType: employee.roster_type,
-      nextEligibleDate: findNextWorkingDay(mealDate, workingDays, holidays),
+      nextEligibleDate: null, // resolved from real data by the service layer
     };
   }
   
@@ -70,7 +78,7 @@ export function computeEligibility(context: EligibilityContext): EligibilityResp
         eligible: false,
         reason: 'REGULAR_NON_WORKING_DAY',
         rosterType: employee.roster_type,
-        nextEligibleDate: findNextWorkingDay(mealDate, workingDays, holidays),
+        nextEligibleDate: null, // resolved from real data by the service layer
       };
     }
   }
@@ -119,45 +127,4 @@ export function computeEligibility(context: EligibilityContext): EligibilityResp
   }
   
   throw new Error(`Unhandled eligibility case for roster_type: ${employee.roster_type}`);
-}
-
-function getWeekday(dateString: string): number {
-  const [year, month, day] = dateString.split('-').map(Number);
-  const date = new Date(Date.UTC(year, month - 1, day));
-  return date.getUTCDay();
-}
-
-function findNextWorkingDay(fromDate: string, workingDays: number[], holidays: Set<string>): string | null {
-  const maxDays = 90;
-  let current = parseDate(fromDate);
-  
-  for (let i = 1; i <= maxDays; i++) {
-    current = addDays(current, 1);
-    const dateStr = formatDate(current);
-    const weekday = getWeekday(dateStr);
-    
-    if (workingDays.includes(weekday) && !holidays.has(dateStr)) {
-      return dateStr;
-    }
-  }
-  
-  return null;
-}
-
-function parseDate(dateString: string): Date {
-  const [year, month, day] = dateString.split('-').map(Number);
-  return new Date(Date.UTC(year, month - 1, day));
-}
-
-function addDays(date: Date, days: number): Date {
-  const result = new Date(date);
-  result.setUTCDate(result.getUTCDate() + days);
-  return result;
-}
-
-function formatDate(date: Date): string {
-  const year = date.getUTCFullYear();
-  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(date.getUTCDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
 }

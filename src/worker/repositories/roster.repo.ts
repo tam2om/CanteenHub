@@ -63,12 +63,17 @@ export async function getFutureEligibleShifts(
 }
 
 /**
- * Get all future published menu dates
+ * Get published menu dates on or after `fromDate`, in ascending order.
+ *
+ * Returned as an ordered array rather than a Set because the next-eligible-date
+ * calculation walks the ACTUAL published menu dates. That is what allows it to
+ * work without an arbitrary calendar search horizon: the data bounds the search,
+ * not a magic number.
  */
 export async function getPublishedMenuDates(
   db: D1Database,
   fromDate: string // inclusive: >= this date
-): Promise<Set<string>> {
+): Promise<string[]> {
   const result = await db
     .prepare(`
       SELECT meal_date FROM menu_days
@@ -77,10 +82,8 @@ export async function getPublishedMenuDates(
     `)
     .bind(fromDate)
     .all<{ meal_date: string }>();
-  
-  const dates = new Set<string>();
-  (result.results || []).forEach(row => dates.add(row.meal_date));
-  return dates;
+
+  return (result.results || []).map(row => row.meal_date);
 }
 
 /**
@@ -242,7 +245,7 @@ export async function bulkInsertRosterEntries(
       errors.push({
         employee_id: entry.employee_id,
         work_date: entry.work_date,
-        error: result.error?.message || 'Unknown error'
+        error: (result as { error?: { message?: string } }).error?.message || 'Unknown error'
       });
     }
   });

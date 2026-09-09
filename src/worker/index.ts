@@ -21,23 +21,26 @@ const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 // Global middleware
 app.use('*', secureHeaders());
 
-// CORS configuration - only needed if frontend and API are on different origins
-// For Cloudflare Pages + Workers on the same account, same-origin is preferred
-const allowedOrigins = (c: Context<{ Bindings: Env }>) => {
-  const origin = c.req.header('Origin');
+// CORS configuration - only needed if frontend and API are on different origins.
+// For Cloudflare Pages + Workers on the same account, same-origin is preferred.
+//
+// Hono calls this with (origin, context) - the request origin FIRST. The previous
+// signature took the context as its only parameter, so `c.req` was undefined and
+// every single request through the app threw a 500 before reaching a route.
+const allowedOrigins = (origin: string, c: Context<{ Bindings: Env }>): string => {
   const env = c.env.ENVIRONMENT;
-  
-  // In production, use configured Frontend URL
-  if (env === 'production' && c.env.FRONTEND_URL) {
-    return origin === c.env.FRONTEND_URL ? c.env.FRONTEND_URL : c.env.FRONTEND_URL;
+
+  // In production, only the configured frontend origin is echoed back.
+  if (env === 'production') {
+    return c.env.FRONTEND_URL ?? '';
   }
-  
-  // In local development, allow localhost
+
+  // In local development, allow the Vite dev server.
   if (env === 'local') {
-    return origin === 'http://localhost:5173' ? 'http://localhost:5173' : 'http://localhost:5173';
+    return origin === 'http://localhost:5173' ? origin : 'http://localhost:5173';
   }
-  
-  return c.env.FRONTEND_URL || '*';
+
+  return c.env.FRONTEND_URL || origin || '*';
 };
 
 app.use('*', cors({

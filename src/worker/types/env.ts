@@ -3,7 +3,7 @@
  */
 
 import type { D1Database } from '@cloudflare/workers-types';
-import type { Role, EmployeeWithRole, SessionData } from '../../shared/types/index.js';
+import type { EmployeeWithRole, SessionData } from '../../shared/types/index.js';
 
 export interface Env {
   // Cloudflare Bindings

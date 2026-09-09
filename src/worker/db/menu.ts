@@ -55,7 +55,7 @@ export async function createMenuDay(
   mealDate: string,
   status: MenuStatus = 'draft'
 ): Promise<MenuDayDB> {
-  const result = await db
+  await db
     .prepare('INSERT INTO menu_days (meal_date, status) VALUES (?, ?)')
     .bind(mealDate, status)
     .run();

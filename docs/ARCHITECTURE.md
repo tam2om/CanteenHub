@@ -4,7 +4,14 @@
 
 Status: **PROPOSAL — awaiting review and approval. No application code, no database tables, no dependencies installed.**
 
-Date: 2026-09-09
+Date: 2026-09-09 · **Revised** after reviewing the actual source files.
+
+> **Revision note.** This document was first written before the source files
+> were available. They have now been examined and the findings are recorded in
+> [`SOURCE-DATA-FINDINGS.md`](./SOURCE-DATA-FINDINGS.md). The employee model was
+> confirmed unchanged; the roster layout, the menu import strategy, and the menu
+> model have been revised below. **A dinner service exists in the source data
+> that the requirements never mention** — see §7.1 and Open Question 8.
 
 ---
 
@@ -166,7 +173,7 @@ One scheduled invocation per night that: purges expired sessions, writes the pre
 3. **Enums are `TEXT` with a `CHECK` constraint,** not integers. `'option_1'` in a database dump is self-documenting; `2` is a bug waiting to happen during a data investigation.
 4. **Foreign keys are declared and enforced** (`PRAGMA foreign_keys = ON`, which D1 applies by default). `ON DELETE RESTRICT` is the default posture — we want deletions to fail loudly rather than silently cascade into someone's meal history.
 5. **Nothing operational is ever hard-deleted.** Employees deactivate, menus unpublish, roster entries supersede. The only rows we physically delete are expired sessions and, optionally, aged audit rows past a retention policy.
-6. **Every table that can grow has an index supporting its hot query.** With a 5M rows-read/day budget and D1 counting *scanned* rows, a missing index on `lunch_selections(meal_date)` would turn a daily report into a full table scan.
+6. **Every table that can grow has an index supporting its hot query.** With a 5M rows-read/day budget and D1 counting *scanned* rows, a missing index on `meal_selections(meal_date)` would turn a daily report into a full table scan.
 
 The full proposed DDL is in [`schema.proposal.sql`](./schema.proposal.sql). It is a **proposal document, not a migration** — no tables are created until this architecture is approved.
 
@@ -181,8 +188,8 @@ The full proposed DDL is in [`schema.proposal.sql`](./schema.proposal.sql). It i
 | `menu_options` | Exactly 2 per menu day | ~500/year |
 | `menu_components` | Condiment/beverage/dessert per menu day | ~750/year |
 | `roster_entries` | Daily shift value for Shift employees | ~30k/year worst case |
-| `lunch_selections` | Current selection per employee per day | ~30k/year |
-| `lunch_selection_history` | Append-only change log | ~35k/year |
+| `meal_selections` | Current selection per employee per day | ~30k/year |
+| `meal_selection_history` | Append-only change log | ~35k/year |
 | `holidays` | Non-working date overrides | ~15/year |
 | `settings` | Key/value application config | ~10 rows |
 | `import_batches` | One row per import attempt | ~50/year |
@@ -296,7 +303,7 @@ There is deliberately **no self-service password reset** in Phase 1: it would re
         ┌──────────────────────┘    │   └──────────────────┐
         │                           │                      │
 ┌───────▼─────────┐   ┌─────────────▼──────┐   ┌───────────▼────────┐
-│ roster_entries  │   │  lunch_selections  │   │  employee_roles    │
+│ roster_entries  │   │  meal_selections   │   │  employee_roles    │
 │─────────────────│   │────────────────────│   │────────────────────│
 │ employee_id  FK │   │ employee_id     FK │   │ employee_id     FK │
 │ work_date       │   │ meal_date          │   │ role            FK │
@@ -306,7 +313,7 @@ There is deliberately **no self-service password reset** in Phase 1: it would re
   'day'|'night'|'off'           │
                                 │ (append-only)
                       ┌─────────▼──────────────────┐
-                      │ lunch_selection_history    │
+                      │ meal_selection_history     │
                       └────────────────────────────┘
 
 ┌──────────────┐        ┌──────────────────┐
@@ -333,7 +340,7 @@ There is deliberately **no self-service password reset** in Phase 1: it would re
 
 ### The one relationship that is deliberately absent
 
-**`lunch_selections` has no foreign key to `menu_days` or `menu_options`.** A selection stores `meal_date` and `choice ∈ {option_1, option_2, no_preference}` — it references the *slot*, not the menu row.
+**`meal_selections` has no foreign key to `menu_days` or `menu_options`.** A selection stores `meal_date`, `meal_type`, and `choice ∈ {option_1, option_2, no_preference}` — it references the *slot*, not the menu row.
 
 This is the single most important modelling decision in the document, because it is what makes "a menu re-import must not destroy existing selections" true by construction rather than by careful coding. If the admin re-imports Wednesday's menu and Option 1 changes from "Grilled Chicken" to "Roast Chicken," every employee who chose Option 1 still has a valid, intact selection. There is no cascade to guard against, no repair script to write, and no way for a future developer to accidentally introduce one.
 
@@ -343,17 +350,62 @@ The trade-off is that a selection does not record *what the food was* at the tim
 
 ## 7. Menu model
 
-### Three tables, not one
+### 7.1 First: there are two meal services, not one
+
+The source files include **`Food_Menu_Lunch_Sep2026.pdf` and
+`Food_Menu_Dinner_Sep2026.pdf`** — a full 30-day dinner menu alongside the
+lunch one. The requirements describe a lunch-only system and never mention
+dinner. Yet the workforce includes Night-shift employees who are explicitly
+meal-eligible, and a dinner menu is evidently published every month.
+
+Structurally, dinner is the same shape as lunch — a two-way choice plus common
+components — with different column names:
+
+| | Lunch | Dinner |
+|---|---|---|
+| Choice A | `Option 1` | `Main Item` |
+| Choice B | `Option 2` | `Optional Alternative` |
+| Components | 5 (salad, side, condiment, beverage, dessert) | 2 (accompaniment, drinks) |
+
+**Recommendation: model the `meal_type` dimension now, build only lunch.**
+
+Every menu and selection row carries `meal_type ∈ ('lunch','dinner')`,
+defaulting to `'lunch'`. Phase 4 builds the lunch experience and nothing else.
+No dinner UI, no dinner eligibility rule, no dinner report.
+
+The justification is asymmetric cost, not speculation about scope:
+
+- **Now:** one column on two tables, one `CHECK`, and its inclusion in two
+  unique keys. About an hour.
+- **Later:** `UNIQUE(employee_id, meal_date)` must become
+  `UNIQUE(employee_id, meal_date, meal_type)` on a live table holding real meal
+  history, under the expand/contract discipline of §17, alongside migrating
+  every report query and every frozen snapshot. Several days of careful work
+  against data that matters.
+
+Carrying one unused column is a trivial price for removing the expensive version
+of this decision. Consequently the selection table is named **`meal_selections`**,
+not `meal_selections` — a table named for lunch that may hold dinner rows is a
+name that will mislead someone within a year.
+
+**This does not decide whether dinner is in scope.** That is Open Question 8,
+and it is the most consequential one in this document: if Night-shift employees
+eat dinner rather than lunch, the eligibility model in §12 changes materially.
+The architecture declines to guess, and instead makes guessing wrong cheap.
+
+### 7.2 Three tables, not one
 
 ```sql
-menu_days(id, meal_date UNIQUE, status, published_at, notes, created_at, updated_at)
+menu_days(id, meal_date, meal_type, status, published_at, notes, ...)   -- UNIQUE(meal_date, meal_type)
 menu_options(id, menu_day_id, option_number CHECK IN (1,2), name, description)
 menu_components(id, menu_day_id, component_type, name, sort_order)
 ```
 
 **Why not one wide `menu_days` table** with `option_1_name`, `option_2_name`, `condiment`, `beverage`, `dessert` columns? It looks simpler and it is the obvious translation of the spreadsheet. It is wrong for two reasons:
 
-1. **The component list is open.** The September 2026 workbook has condiment, beverage, and dessert/fruit. Next quarter's menu may add soup or salad. In the wide model that is a schema migration; in the normalized model it is a new row with a different `component_type`. The requirement explicitly says not to simplify in a way that prevents preserving these details.
+1. **The component list is open — and this has already been proven.** The requirements named three components (condiment, beverage, dessert/fruit). The actual lunch menu has **five** columns: `Option Meal 1` (salad), `Option Meal 2` (yoghurt/side), `Condiment`, `Beverage`, and `Dessert / Fruits`. The dinner menu has a different pair again (accompaniment, drinks). In the normalized model those extra types landed as data with no schema change; in a wide table with one column per component, this discovery would already have been a migration — before a single row was written. The requirement explicitly says not to simplify in a way that prevents preserving these details.
+
+   **A trap worth naming:** despite being called `Option Meal 1` and `Option Meal 2`, those two columns are **not** selectable options — they are the salad and the yoghurt served alongside whichever main the employee chose. Reading the header row alone, a developer would reasonably build four choices. The mapping module must carry a comment saying so, because the header text actively argues for the wrong reading.
 2. **Options need structure.** Each option has a name and a description, and will plausibly grow attributes (vegetarian flag, allergen list, photo). Two columns become six become twelve.
 
 **Why is `option_number` constrained to exactly 1 or 2?** Because the business rule is "two options per day," and the requirement is explicit. Encoding it as a `CHECK` plus `UNIQUE(menu_day_id, option_number)` means the database itself refuses a malformed import. If the company ever offers three options, that is a deliberate migration and a deliberate change to the employee UI — not something an importer should be able to do by accident.
@@ -372,6 +424,17 @@ draft ──publish──► published ──unpublish──► draft
 - **`published`** — visible to employees; selections are open (subject to eligibility and cutoff).
 - Unpublishing a day that already has selections is permitted but **warns** with the affected count and writes an audit entry. It does not delete selections.
 - **Historical preservation:** past menu days are never deleted or edited by the importer. An import that targets a past date is rejected at validation with an explicit error unless a super_admin sets an "allow historical correction" flag on that specific batch — and if they do, the change is audited with before/after JSON.
+
+### Menus exist on every day of the week
+
+The September 2026 menus have rows for **every calendar day, Friday and Saturday
+included**. This is expected: Regular employees are not eligible at the weekend,
+but Shift employees on a Day or Night rotation are, and they still eat.
+
+It confirms that `menu_days` is per calendar day and **entirely decoupled from
+eligibility**. A menu existing for a date says nothing about who may select it;
+those are two independent questions answered by two independent parts of the
+system. No change was needed here — the model already worked this way.
 
 ### Upcoming menus for employees
 
@@ -441,9 +504,44 @@ roster_entries(
 
 Plus an append-only `roster_entry_history` recording every change (old value, new value, actor, batch, timestamp) — the requirement asks to "review roster changes" and "preserve roster history," and a mutable current-value table alone cannot answer "who moved Ahmad from Night to Off on the 12th, and when."
 
+### The actual source layout
+
+The `Shifts roster` sheet is laid out as:
+
+```
+   code   | month | year |  1  |  2  |  3  | ... |  31
+ AMCO093  |   9   | 2026 | Off | Off | Day | ... |
+ AMCO243  |   9   | 2026 | Off | Off | Off | ... |
+```
+
+Three things about this differ from what was assumed before the file was seen,
+and all three are importer concerns rather than model concerns:
+
+1. **`month` and `year` are data columns**, and the day columns are bare
+   day-of-month numbers. So `work_date` is *composed* from
+   `(year, month, dayColumnIndex)` rather than parsed from a header. This is
+   better than the assumed layout — no date parsing at all, and one file can
+   carry several months as separate rows.
+2. **There are always 31 day columns**, whatever the month's length. September
+   populates 30 and leaves column `31` blank. The importer ignores day columns
+   past the real month length, but treats a **populated** day-31 cell in a
+   30-day month as a validation error — a value there means the file is wrong
+   or the month/year columns are wrong, and either way somebody should look.
+3. **The employee key column is named `code`**, not `AMCO ID#` as on the
+   employee sheet — the same business key under two different headers in one
+   workbook. The alias list must cover both, which is exactly why §13 matches
+   on header text with an explicit alias set rather than on column position.
+
+Shift values are Title Case: `Day`, `Night`, `Off`.
+
+`AMCO243` in the sample alternates `Day` and `Night` within a single month,
+confirming that **`shift_value` must be per-day and can never be an attribute of
+the employee.**
+
 ### Why one row per employee per day rather than a wide month-shaped table
 
-The September 2026 workbook is almost certainly laid out as one row per employee with 30 date columns. That is a *presentation* shape, not a storage shape. Storing it long-form gives us:
+That wide layout is a *presentation* shape, not a storage shape. Storing it
+long-form gives us:
 
 - `UNIQUE(employee_id, work_date)` — a genuine guarantee of one shift per person per day, enforced by the database.
 - Trivial queries for "who is on Night this Thursday" and "show me this employee's month."
@@ -454,7 +552,7 @@ The importer's job is to pivot the wide sheet into long rows. That pivot happens
 
 ### Which employees get roster rows
 
-Only `roster_type = 'shift'` employees. This is enforced at import validation: a roster row for a `regular` or `amman_hq` employee is a **validation error**, surfaced in the preview, not silently accepted. Accepting it would create data that looks meaningful but that the eligibility function ignores — the worst kind of data, because it makes the system look wrong when it is right.
+Only `roster_type = 'shift'` employees. This is enforced at import validation: a roster row for a `regular` or `amman_hq` employee is a **validation error**, surfaced in the preview, not silently accepted. A roster row for an AMCO ID that does not exist at all is likewise an error, and the importer **never creates employees from a roster file** — in the sample data, all three roster employees were absent from the employee sheet, and a permissive importer would have silently created three employees with no `roster_type`, which is the single field the entire eligibility calculation depends on. Accepting it would create data that looks meaningful but that the eligibility function ignores — the worst kind of data, because it makes the system look wrong when it is right.
 
 ### The critical rule: a missing roster entry is NOT eligibility
 
@@ -471,7 +569,7 @@ This distinction is what turns a silent data gap into an actionable one. If fort
 ## 10. Lunch selection model
 
 ```sql
-lunch_selections(
+meal_selections(
   id             INTEGER PK,
   employee_id    INTEGER NOT NULL REFERENCES employees(id),
   meal_date      TEXT NOT NULL,
@@ -485,25 +583,29 @@ lunch_selections(
 )
 ```
 
-### Why `UNIQUE(employee_id, meal_date)` and upsert rather than append
+The table is named `meal_selections` rather than `lunch_selections`, and carries
+`meal_type` (defaulting to `'lunch'`), for the reasons in §7.1. Phase 1 writes
+only `'lunch'` rows.
+
+### Why `UNIQUE(employee_id, meal_date, meal_type)` and upsert rather than append
 
 An employee has exactly one current answer for a day. Modelling the current state as one row makes the two hot queries — "what did I pick?" and "count portions for today" — single indexed reads with no window functions or `MAX(created_at)` subqueries. The change *history* lives in its own append-only table where it belongs. This keeps the operational table small and the reporting query trivial, which matters directly against D1's rows-scanned accounting.
 
 The write is a single statement:
 
 ```sql
-INSERT INTO lunch_selections (employee_id, meal_date, choice, ...)
+INSERT INTO meal_selections (employee_id, meal_date, choice, ...)
 VALUES (?1, ?2, ?3, ...)
-ON CONFLICT (employee_id, meal_date)
+ON CONFLICT (employee_id, meal_date, meal_type)
 DO UPDATE SET choice = excluded.choice, selected_at = ..., updated_at = ...;
 ```
 
 Atomic, race-free, one round trip. Two rapid taps from a flaky mobile connection cannot produce two rows.
 
-### `lunch_selection_history` — append-only, never updated
+### `meal_selection_history` — append-only, never updated
 
 ```sql
-lunch_selection_history(
+meal_selection_history(
   id, employee_id, meal_date,
   previous_choice TEXT,        -- NULL on first selection
   new_choice TEXT,
@@ -511,7 +613,7 @@ lunch_selection_history(
 )
 ```
 
-Every insert and every update to `lunch_selections` writes a history row **in the same `batch()`** so the two cannot diverge. This is our answer to "preserve an audit trail of admin changes" for the selection domain specifically, and it also gives employees a defensible record ("I did change it before the cutoff").
+Every insert and every update to `meal_selections` writes a history row **in the same `batch()`** so the two cannot diverge. This is our answer to "preserve an audit trail of admin changes" for the selection domain specifically, and it also gives employees a defensible record ("I did change it before the cutoff").
 
 ### `source` and why admin overrides are distinguishable
 
@@ -761,15 +863,73 @@ Each import type has a declared mapping from expected header text to internal fi
 
 If a required column is missing, the import **stops at parse time with a clear message naming the missing column** and shows the headers it did find. It never guesses by column position — a silently mis-mapped column that puts department values into the roster field is exactly the kind of failure that reaches production looking fine.
 
-**These mappings will be finalized against the actual workbooks.** The three files described in the requirements (employees, September 2026 roster, September 2026 menu) are **not present in this repository** — see Open Question 1. The mapping layer is deliberately isolated in `src/shared/import/mappings/` so that adapting to the real headers is a single-file change per import type, not a refactor.
+**The mappings are now derived from the real files** (full detail in
+[`SOURCE-DATA-FINDINGS.md`](./SOURCE-DATA-FINDINGS.md)):
+
+| Import | Source | Headers |
+|---|---|---|
+| Employees | `All Employees` sheet | `AMCO ID#`, `Name`, `Department`, `Section`, `Roster` |
+| Roster | `Shifts roster` sheet | `code`, `month`, `year`, `1` … `31` |
+| Menu (lunch) | *source workbook not yet supplied* | `Day`, `Date`, `Option 1`, `Option 2`, `Option Meal 1`, `Option Meal 2`, `Condiment`, `Beverage`, `Dessert / Fruits` |
+| Menu (dinner) | *source workbook not yet supplied* | `Date`, `Day`, `Main Item`, `Optional Alternative`, accompaniment, drinks |
+
+Two structural facts change the flow described above:
+
+**Employees and roster arrive in one workbook, on two sheets.** The upload is a
+single file that yields two different kinds of change. The importer therefore
+asks the admin **which sheet to import**, pre-selecting a best guess, and
+commits one entity type per confirmation. Auto-importing both sheets would mean
+a single confirmation click committing two unrelated changes — which defeats the
+entire purpose of the preview stage.
+
+**All text fields are trimmed and internal whitespace runs collapsed.** The real
+employee sheet contains `"Maintenance  "` and `" Fleet &Transportation  "`.
+Left as-is, `GROUP BY department` in the reports produces duplicate rows that
+look identical on screen — a bug that is invisible in development and obvious
+and embarrassing in front of the administrator.
+
+The mapping layer stays isolated in `src/shared/import/mappings/` so that a
+future header change is a single-file edit per import type.
 
 ### Per-type notes
 
 **Employees** — matched on `amco_id`. New AMCO ID → `create`. Existing with differences → `update` (diff shown field by field). Existing and identical → `unchanged`. Invalid `roster_type` → `error` with the offending value quoted. Imports never set or clear passwords, and never change `is_active` except through the separate explicit action described in §11.
 
-**Roster** — the wide month sheet is pivoted in the browser into `(amco_id, work_date, shift_value)` triples. Unknown AMCO ID → `error`. Employee is not `shift` type → `error`. Unrecognised shift value → `error` with the raw cell text shown (real sheets contain `D`, `N`, `OFF`, blanks, and stray spaces; the mapping normalizes a documented alias set and rejects the rest rather than guessing). A blank cell is reported as *no entry* — it is not silently converted to `off`, per §9.
+**Roster** — the wide month sheet is pivoted in the browser into `(code, work_date, shift_value)` triples, with `work_date` composed from the row's `year` and `month` columns and the day-column index (§9). Unknown AMCO ID → `error`, and **never an auto-created employee**. Employee is not `shift` type → `error`. Unrecognised shift value → `error` with the raw cell text shown; the real file uses `Day`, `Night`, `Off` in Title Case, and the mapping normalizes case and whitespace but rejects anything outside the documented alias set rather than guessing. A blank cell within the month is reported as *no entry* — never silently converted to `off`, per §9. A populated cell in a day column beyond the month's length is an `error`.
 
-**Menu** — each day yields one `menu_days` row, exactly two `menu_options`, and N `menu_components`. Fewer or more than two options is an `error`, not a silent accept. Imports land as `draft` and require an explicit publish step, so a wrong import is never visible to employees. A date that already has selections is flagged as a `conflict` with the count.
+**Menu** — each day yields one `menu_days` row (keyed by date **and `meal_type`**, §7.1), exactly two `menu_options`, and N `menu_components`. Fewer or more than two options is an `error`, not a silent accept. `Option Meal 1` and `Option Meal 2` map to **components, not options**, despite their names. Imports land as `draft` and require an explicit publish step, so a wrong import is never visible to employees. A date that already has selections is flagged as a `conflict` with the count.
+
+Dish names are stored **exactly as supplied**, trimmed of leading and trailing
+whitespace and nothing more. The real menus contain inconsistent spellings of
+the same item (`Youghurt` / `Yoghurt`) and outright typos (`Checken`, `Souce`,
+`Cucmber`). These strings are read by humans deciding what to eat, and the
+administrator can correct them on the manual edit screen. Fuzzy-matching or
+auto-correcting dish names would be the importer inventing data, which is the
+one thing an importer must never do.
+
+#### The menu source is a PDF, and that is a problem worth escalating
+
+Both menus were supplied as **single-page PDFs**, not workbooks. Both carry
+`/Producer = Microsoft® Excel® for Microsoft 365`, so a source spreadsheet
+exists — we were given its print export.
+
+**Recommendation: request the source `.xlsx` and import that. Do not build a PDF
+table extractor.**
+
+This is not a stylistic preference. Extracting a table from a PDF means
+reconstructing rows and columns from absolute text coordinates, and a cell whose
+text wraps begins at a different x-position than the column it belongs to.
+Extracting the lunch menu during this review mis-assigned **4 of 30 rows** — 13%
+— purely from text wrapping, and every one of those errors placed a main dish in
+the wrong column. For a system whose entire output is telling a caterer how many
+portions of which dish to prepare, a 13% row-level error rate in the menu
+importer is disqualifying, not a tuning problem.
+
+If the source workbook genuinely cannot be produced, the fallback is **manual
+entry**, which this architecture already requires anyway (§22 builds manual CRUD
+in Phase 3, before any importer). Thirty days against a purpose-built form is
+roughly an hour a month, and it is correct. A PDF importer would be faster and
+wrong.
 
 ### Export for round-tripping
 
@@ -785,7 +945,7 @@ Every report is a `GROUP BY` executed in D1, returning tens of rows rather than 
 
 ```sql
 -- Portion counts (this drives the catering order)
-SELECT choice, COUNT(*) FROM lunch_selections
+SELECT choice, COUNT(*) FROM meal_selections
 WHERE meal_date = ?1 GROUP BY choice;
 ```
 
@@ -825,7 +985,7 @@ Historical reports read the snapshot. Today's report is always live. A recompute
 | **Eligible but not selected** | Named list for follow-up. |
 | **Not eligible** | Named list grouped by reason. |
 | **Department totals** | `GROUP BY department, choice` — the meaningful cut for cost allocation. |
-| **Selection changes** | From `lunch_selection_history` — who changed what, when, and admin overrides with reasons. |
+| **Selection changes** | From `meal_selection_history` — who changed what, when, and admin overrides with reasons. |
 | **Import history** | From `import_batches` — what was imported, by whom, with what impact. |
 
 ### 14.5 Export formats
@@ -1203,7 +1363,7 @@ Rate limiting rules, backup/restore rehearsal, load sanity check, accessibility 
 7. **Eligibility is one pure function** taking injected data, shared by the Worker, the UI, and the import impact analyser — so the three can never disagree, and the whole rule set is exhaustively unit-testable with no infrastructure.
 8. **`roster_type` on the employee is the single eligibility discriminator** — `regular` reads the working-days calendar, `shift` reads roster rows, `amman_hq` is always ineligible. Department never affects eligibility.
 9. **A missing roster row is `roster_missing`, never `off`** — a distinct, first-class outcome, so a late roster becomes a visible operational signal instead of a silent under-count.
-10. **`lunch_selections` has no foreign key to the menu.** A selection references the *slot* (`option_1`/`option_2`/`no_preference`), which is what makes "a menu re-import cannot destroy selections" true by construction rather than by careful coding.
+10. **`meal_selections` has no foreign key to the menu.** A selection references the *slot* (`option_1`/`option_2`/`no_preference`), which is what makes "a menu re-import cannot destroy selections" true by construction rather than by careful coding.
 11. **Menu normalized into `menu_days` + `menu_options` + `menu_components`**, with `option_number` constrained to exactly 1 or 2 — preserving condiment/beverage/dessert detail without a schema change when the component list grows.
 12. **Current state plus append-only history** for selections and roster: one row for "what is true now," an immutable log for "what changed, when, by whom."
 13. **Nothing operational is ever hard-deleted.** Employees deactivate, menus unpublish, imports never issue a `DELETE`. Absence from a spreadsheet is not an instruction to delete.
@@ -1221,14 +1381,45 @@ Rate limiting rules, backup/restore rehearsal, load sanity check, accessibility 
 25. **GitHub → Workers Builds → migrations → deploy**, with a separate preview D1 database and mandatory expand/contract migration discipline, since schema and code cannot deploy transactionally.
 26. **Manual administration is built before importers** (Phase 3 before Phase 6), so the data model is proven by real use and the system is operable even when an import fails.
 
+*Added after reviewing the actual source files:*
+
+27. **The `meal_type` dimension is modelled now and the dinner feature is not built.** A full dinner menu exists in the source data that the requirements never mention. Adding the column now costs an hour; adding it later means migrating live meal history and a uniqueness constraint. The selection table is named `meal_selections` accordingly. Whether dinner is in scope is Open Question 8 — the architecture declines to guess, and makes guessing wrong cheap.
+28. **The menu importer targets a source `.xlsx`, never the supplied PDF.** Reconstructing the table from PDF text coordinates mis-assigned 13% of rows on text wrapping alone during this review. If no workbook can be produced, manual entry is the correct fallback — it is roughly an hour a month and it is right.
+29. **Employees and roster arrive in one two-sheet workbook; the admin imports one sheet per confirmation.** A single click must never commit two unrelated kinds of change, or the preview stage stops meaning anything.
+30. **All imported text is trimmed and internal whitespace collapsed**, because the real employee sheet contains `"Maintenance  "` and `" Fleet &Transportation  "` — untrimmed, these become duplicate-looking rows in every department report.
+31. **Dish names are stored verbatim.** The real menus contain typos and inconsistent spellings of the same item. Correcting them is the administrator's job on the edit screen, not the importer's — an importer that rewrites data it does not understand is worse than one that preserves a typo.
+
 ---
 
 # Open Questions
 
-These are the questions I genuinely could not resolve from the requirements. Everything else has been decided above.
+These are the questions I genuinely could not resolve from the requirements or
+from the source files. Everything else has been decided above.
 
-**1. The three workbooks are not in this repository.**
-The requirements refer to an uploaded employee workbook, a September 2026 roster, and a September 2026 menu, and state the employee workbook should be treated as the source of truth for the initial data structure. None of the three is present here — the repository was empty. The column mappings in §13 are isolated so adapting is cheap, but exact header text, sheet names, roster sheet layout (I have assumed employees-as-rows with dates-as-columns), and the precise menu component labels cannot be finalized without the files. **Please attach them before Phase 1.**
+**Two of them block Phase 3 and should be answered first: Question 8 (is dinner
+in scope?) and Question 4 (the real cutoff time, and whether Night shift needs a
+different one).** Both shape the eligibility model, which everything else is
+built on. The rest can be answered as their phases approach.
+
+> **Question 1 has been answered** — the source files were supplied and reviewed;
+> see [`SOURCE-DATA-FINDINGS.md`](./SOURCE-DATA-FINDINGS.md). It is replaced by
+> Questions 1 and 8 below, both of which came out of that review.
+
+**1. Can the menu *source workbook* be supplied, rather than the PDF export?**
+Both menus arrived as PDFs, but both were produced by Excel — a spreadsheet
+exists upstream. §13 explains why a PDF importer is not viable (13% of rows
+mis-assigned on text wrapping during this review, every error putting a main
+dish in the wrong column). With the workbook, the menu importer is
+straightforward. Without it, menu entry is manual — about an hour a month,
+entirely workable, but it should be a decision rather than a surprise.
+*Which is it?*
+
+**Also:** the employee and roster sheets supplied are clearly partial samples —
+14 employees and 3 roster rows, with no overlap between them. **How many
+employees are there in total, and roughly what is the Regular / Shift / Amman HQ
+split?** This does not change the architecture, but it determines whether the
+free-tier D1 write budget has the large margin assumed in §0 or merely an
+adequate one.
 
 **2. May employees select for future dates, or only for today?**
 Advance selection helps night-shift employees who will not be online tomorrow morning, and the cutoff still governs the final answer — so §7 proposes allowing it, gated by `allow_future_selection`. But if the caterer's process assumes selections only firm up on the day, this should be `false`. *Which matches how the canteen actually works?*
@@ -1248,7 +1439,35 @@ If any eligible employees lack device access, they either always fall into "elig
 **7. Should Amman HQ employees see the menu at all?**
 They can log in but cannot select. *Should they see what is being served (informational, and arguably pleasant), or is the menu irrelevant to them and better hidden to avoid confusion?* The proposal shows it read-only with a clear explanatory banner; this is easily flipped.
 
-**8. Retention policy for personal data.**
+**8. Is dinner in scope, and do Night-shift employees eat dinner rather than lunch?**
+*This is the most consequential open question in the document.*
+
+A complete 30-day dinner menu was supplied alongside the lunch one, with the
+same two-choice structure. The requirements describe a lunch-only system and
+never mention dinner — yet they also state that Night-shift employees are meal
+eligible, and a night-shift employee is unlikely to be on site for lunch.
+
+Three readings are possible, and they lead to materially different systems:
+
+1. **Dinner is out of scope.** Night-shift employees select lunch like everyone
+   else; the dinner menu is managed outside CanteenHub. The system as designed
+   is correct and complete.
+2. **Day shift eats lunch, Night shift eats dinner.** Then eligibility is not
+   one boolean but a *meal-type assignment*: `shift_value = 'day'` → lunch,
+   `'night'` → dinner. §12's function returns which service the employee is
+   eligible for, the employee UI shows the right menu, and the daily report
+   produces two sets of portion counts.
+3. **Both services are open to all eligible employees**, and an employee makes
+   up to two selections per day.
+
+I have deliberately **not** guessed, because §12 states the eligibility rules
+must not be invented — and this would be inventing the most important one. The
+architecture instead makes the wrong guess cheap: `meal_type` is modelled now
+(§7.1) and no dinner feature is built. Answering this before Phase 3 costs
+nothing; answering it after Phase 5 means reworking eligibility, the employee
+screen, and every report.
+
+**9. Retention policy for personal data.**
 Selections, history, and audit records are currently kept indefinitely. If the company has a data-retention or privacy policy governing employee records, it should shape a purge or anonymisation routine for departed employees — and that is far cheaper to design now than to retrofit.
 
 ---

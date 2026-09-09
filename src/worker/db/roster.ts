@@ -33,7 +33,7 @@ export async function upsertRosterEntry(
   shiftValue: ShiftValue,
   source: ImportSource = 'manual'
 ): Promise<RosterEntryDB> {
-  const result = await db
+  await db
     .prepare(`
       INSERT INTO roster_entries (employee_id, work_date, shift_value, source)
       VALUES (?, ?, ?, ?)
@@ -112,7 +112,6 @@ export async function bulkInsertRosterEntries(
     source: ImportSource;
   }>
 ): Promise<number> {
-  let inserted = 0;
   
   const stmt = db.prepare(`
     INSERT INTO roster_entries (employee_id, work_date, shift_value, source)
