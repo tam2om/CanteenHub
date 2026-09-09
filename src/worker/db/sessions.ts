@@ -73,6 +73,30 @@ export async function deleteSessionByToken(db: D1Database, token: string): Promi
 }
 
 /**
+ * Delete EVERY session belonging to one employee.
+ *
+ * Used when an administrator sets a new password, and when an employee is
+ * deactivated: the point of both actions is that the old credential stops
+ * working immediately, which it does not if a previously issued session cookie
+ * still authenticates. Sessions are opaque server-side rows (the token is stored
+ * only as a SHA-256 hash), so deleting the rows is what revocation means here -
+ * there is no stateless token left to keep working.
+ *
+ * Returns the number of sessions revoked.
+ */
+export async function deleteSessionsForEmployee(
+  db: D1Database,
+  employeeId: number
+): Promise<number> {
+  const result = await db
+    .prepare('DELETE FROM sessions WHERE employee_id = ?')
+    .bind(employeeId)
+    .run();
+
+  return (result.meta?.changes as number | undefined) ?? 0;
+}
+
+/**
  * Delete expired sessions (cleanup)
  */
 export async function deleteExpiredSessions(db: D1Database): Promise<number> {
