@@ -116,13 +116,19 @@ export async function logRosterChange(
   action: 'CREATE' | 'UPDATE' | 'DELETE',
   ipAddress: string | null = null
 ): Promise<AuditLog> {
+  // The roster entry's own id is unstable across a delete, so the audit row is
+  // keyed by the employee and date that identify it. These were previously
+  // accepted as parameters and silently dropped, which left audit rows that
+  // could not be traced back to a person or a day.
   return logAudit(db, {
     actorId,
     action: `${action}_ROSTER_ENTRY`,
     entityType: 'ROSTER_ENTRY',
-    entityId: null, // ID may not exist for deletes
+    entityId: employeeId,
     beforeJson,
-    afterJson,
+    afterJson: afterJson
+      ? JSON.stringify({ employee_id: employeeId, work_date: workDate, entry: JSON.parse(afterJson) })
+      : JSON.stringify({ employee_id: employeeId, work_date: workDate, entry: null }),
     ipAddress
   });
 }
@@ -146,7 +152,69 @@ export async function logMenuChange(
     entityType: 'MENU_DAY',
     entityId: menuDayId,
     beforeJson,
-    afterJson,
+    afterJson: afterJson
+      ? JSON.stringify({ meal_date: mealDate, menu_day: JSON.parse(afterJson) })
+      : JSON.stringify({ meal_date: mealDate, menu_day: null }),
+    ipAddress
+  });
+}
+
+/**
+ * Create audit entry for a menu OPTION mutation (Option 1 / Option 2).
+ *
+ * Options are what employees actually choose between, so changing one silently
+ * would let the meaning of every existing selection shift with no record of who
+ * changed it. Follows the same `${ACTION}_${ENTITY}` naming as the menu-day
+ * audit, and carries the owning menu day's id and date so an investigation can
+ * start from a date rather than an internal option id.
+ */
+export async function logMenuOptionChange(
+  db: D1Database,
+  actorId: number,
+  menuDayId: number,
+  mealDate: string,
+  optionNumber: number,
+  beforeJson: string | null,
+  afterJson: string | null,
+  action: 'CREATE' | 'UPDATE',
+  ipAddress: string | null = null
+): Promise<AuditLog> {
+  return logAudit(db, {
+    actorId,
+    action: `${action}_MENU_OPTION`,
+    entityType: 'MENU_OPTION',
+    entityId: menuDayId,
+    beforeJson,
+    afterJson: afterJson
+      ? JSON.stringify({ meal_date: mealDate, option_number: optionNumber, option: JSON.parse(afterJson) })
+      : null,
+    ipAddress
+  });
+}
+
+/**
+ * Create audit entry for a menu COMPONENT mutation
+ * (condiment / beverage / dessert / salad and friends).
+ */
+export async function logMenuComponentChange(
+  db: D1Database,
+  actorId: number,
+  menuDayId: number,
+  mealDate: string,
+  beforeJson: string | null,
+  afterJson: string | null,
+  action: 'CREATE' | 'UPDATE',
+  ipAddress: string | null = null
+): Promise<AuditLog> {
+  return logAudit(db, {
+    actorId,
+    action: `${action}_MENU_COMPONENT`,
+    entityType: 'MENU_COMPONENT',
+    entityId: menuDayId,
+    beforeJson,
+    afterJson: afterJson
+      ? JSON.stringify({ meal_date: mealDate, component: JSON.parse(afterJson) })
+      : null,
     ipAddress
   });
 }
@@ -164,13 +232,22 @@ export async function logSelectionOverride(
   overrideReason: string,
   ipAddress: string | null = null
 ): Promise<AuditLog> {
+  // Record WHO was overridden, for WHICH date, and WHY. Without these the audit
+  // row says only "an admin overrode something", which is not an audit trail.
   return logAudit(db, {
     actorId,
     action: 'ADMIN_OVERRIDE_SELECTION',
     entityType: 'LUNCH_SELECTION',
-    entityId: null,
+    entityId: employeeId,
     beforeJson,
-    afterJson,
+    afterJson: afterJson
+      ? JSON.stringify({
+          employee_id: employeeId,
+          meal_date: mealDate,
+          override_reason: overrideReason,
+          selection: JSON.parse(afterJson),
+        })
+      : null,
     ipAddress
   });
 }

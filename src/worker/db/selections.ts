@@ -39,7 +39,7 @@ export async function upsertLunchSelection(
   // Get existing selection for history
   const existing = await getLunchSelection(db, employeeId, mealDate);
   
-  const result = await db
+  await db
     .prepare(`
       INSERT INTO lunch_selections (employee_id, meal_date, choice, source, set_by, override_reason)
       VALUES (?, ?, ?, ?, ?, ?)

@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
-    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "build": "tsc --noEmit -p tsconfig.json && vite build",
+    "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "test": "vitest run",
     "test:ui": "vitest --ui",
@@ -15,7 +15,7 @@
     "worker:deploy": "wrangler deploy",
     "db:migrate": "wrangler d1 migrations apply canteenhub-local --local",
     "db:migrate:prod": "wrangler d1 migrations apply canteenhub-prod",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "hono": "^4.13.7",

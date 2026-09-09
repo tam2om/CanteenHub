@@ -92,20 +92,29 @@ export async function requireAuth(
 }
 
 /**
- * Require specific role middleware
- * Returns 403 if user doesn't have required role
+ * Require specific role middleware. Returns 403 if the user lacks the role.
+ *
+ * Accepts either a single array - `requireRole(['admin', 'super_admin'])` - or
+ * varargs. Every call site in the codebase passes an array, which the previous
+ * varargs-only signature silently mis-handled: `roles` became a nested array, so
+ * `roles.includes(role)` was never true and every admin route rejected every
+ * admin. Flattening the argument list makes both spellings behave identically.
  */
-export function requireRole(...roles: Array<'employee' | 'admin' | 'super_admin'>) {
+export type RoleName = 'employee' | 'admin' | 'super_admin';
+
+export function requireRole(...roles: Array<RoleName | RoleName[]>) {
+  const allowed = roles.flat();
+
   return async (
     c: Context<{ Bindings: Env; Variables: AuthenticatedVariables }>,
     next: Next
   ) => {
     const employee = c.get('employee');
-    
-    if (!employee || !roles.includes(employee.role)) {
+
+    if (!employee || !allowed.includes(employee.role)) {
       return c.json({ success: false, error: 'Insufficient permissions' }, 403);
     }
-    
+
     return next();
   };
 }

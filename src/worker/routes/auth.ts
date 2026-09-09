@@ -224,17 +224,6 @@ authRoutes.put('/change-password', async (c) => {
 });
 
 /**
- * Generate a cryptographically secure random session token
- * Uses Web Crypto API for sufficient entropy (32 bytes = 256 bits)
- */
-export function generateSessionToken(): string {
-  const randomBytes = crypto.getRandomValues(new Uint8Array(32));
-  return Array.from(randomBytes)
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
-}
-
-/**
  * Parse cookie string into Map
  */
 function parseCookies(cookieString: string): Map<string, string> {

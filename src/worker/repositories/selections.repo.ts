@@ -8,7 +8,16 @@ import type { LunchSelection, LunchChoice, SelectionSource, LunchSelectionHistor
 
 export interface SelectionMutationResult {
   selection: LunchSelection;
-  historyRecord: LunchSelectionHistory;
+  /**
+   * The history row written for this mutation, or `null` when the submission was
+   * a no-op (the employee re-submitted the choice they already had). A no-op
+   * must NOT fabricate a history record - a selection history full of "changed
+   * from option_1 to option_1" rows is worse than useless, because it destroys
+   * the ability to answer "when did this person actually change their mind?"
+   */
+  historyRecord: LunchSelectionHistory | null;
+  /** False when nothing was written to the database. */
+  changed: boolean;
   beforeJson: string | null;
   afterJson: string | null;
 }
@@ -51,8 +60,19 @@ export async function getSelectionsByDate(
 }
 
 /**
- * Create or update employee's lunch selection
- * Also creates a history record
+ * Create or update an employee's lunch selection.
+ *
+ * Three cases:
+ *   A) No existing selection      -> INSERT selection + INSERT history
+ *   B) Existing, different intent -> UPDATE selection + INSERT history
+ *   C) Existing, identical intent -> NOTHING IS WRITTEN
+ *
+ * Case C is a true no-op: no UPDATE, so `updated_at` is untouched, and no
+ * history row. "Identical intent" means the choice, the source, and the override
+ * reason all match what is already stored - so an employee tapping the same
+ * option twice does nothing, while an admin re-issuing an override with a
+ * DIFFERENT reason is still recorded, because that is a genuine, auditable
+ * change to why the row looks the way it does.
  */
 export async function upsertSelection(
   db: D1Database,
@@ -68,7 +88,23 @@ export async function upsertSelection(
   const existing = await getSelectionByEmployeeAndDate(db, employeeId, mealDate);
   const beforeJson = existing ? JSON.stringify(existing) : null;
   const previousChoice = existing?.choice ?? null;
-  
+
+  // Case C: identical submission. Touch nothing and return what is already there.
+  if (
+    existing &&
+    existing.choice === choice &&
+    existing.source === source &&
+    (existing.override_reason ?? null) === overrideReason
+  ) {
+    return {
+      selection: existing,
+      historyRecord: null,
+      changed: false,
+      beforeJson,
+      afterJson: beforeJson,
+    };
+  }
+
   // Upsert the selection
   if (existing) {
     await db
@@ -121,6 +157,7 @@ export async function upsertSelection(
   return {
     selection,
     historyRecord,
+    changed: true,
     beforeJson,
     afterJson: JSON.stringify(selection)
   };

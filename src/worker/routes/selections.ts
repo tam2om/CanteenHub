@@ -5,7 +5,7 @@
 
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types/env.js';
-import { requireAuth, requireRole } from '../lib/auth.js';
+import { requireAuth, requireRole } from '../middleware/session.js';
 import { getSelectionByEmployeeAndDate, getSelectionsByDate, upsertSelection, adminOverrideSelection, getSelectionHistory } from '../repositories/selections.repo.js';
 import { getEligibilityWithNextDate } from '../services/eligibility.service.js';
 import { isCutoffPassed } from '../services/settings.service.js';
@@ -18,11 +18,11 @@ const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 /**
  * GET /api/selections/me/:date - Get current employee's selection for a date
  */
-app.get('/me/:date', async (c) => {
+app.get('/me/:date', requireAuth, async (c) => {
   const db = c.env.DB;
   const session = c.get('session');
   const employeeId = session!.employee_id;
-  const mealDate = c.req.param('date');
+  const mealDate = c.req.param('date')!;
   
   if (!/^\d{4}-\d{2}-\d{2}$/.test(mealDate)) {
     return c.json({ success: false, error: 'Invalid date format. Use YYYY-MM-DD' }, 400);
@@ -40,7 +40,7 @@ app.post('/me', requireAuth, async (c) => {
   const db = c.env.DB;
   const session = c.get('session');
   const employeeId = session!.employee_id;
-  const ipAddress = c.req.header('X-Forwarded-For') || c.req.raw.remoteAddr || null;
+  const ipAddress = c.req.header('X-Forwarded-For') || null;
   
   const body = await c.req.json();
   const { meal_date, choice } = body;
@@ -99,7 +99,13 @@ app.post('/me', requireAuth, async (c) => {
       ipAddress
     );
     
-    return c.json({ success: true, data: result.selection }, result.beforeJson ? 200 : 201);
+    // `changed: false` means the employee re-submitted the choice they already
+    // had: nothing was written and no history row was created. Reported as 200
+    // with the flag, so the client can distinguish "saved" from "already set".
+    return c.json(
+      { success: true, data: result.selection, changed: result.changed },
+      result.changed && !result.beforeJson ? 201 : 200
+    );
   } catch (error) {
     console.error('Error saving selection:', error);
     return c.json({ success: false, error: 'Failed to save selection' }, 500);
@@ -110,7 +116,7 @@ app.post('/me', requireAuth, async (c) => {
  * GET /api/selections/:date - Get all selections for a date (Admin only)
  */
 app.get('/:date', requireAuth, requireRole(['admin', 'super_admin']), async (c) => {
-  const mealDate = c.req.param('date');
+  const mealDate = c.req.param('date')!;
   
   if (!/^\d{4}-\d{2}-\d{2}$/.test(mealDate)) {
     return c.json({ success: false, error: 'Invalid date format. Use YYYY-MM-DD' }, 400);
@@ -126,8 +132,8 @@ app.get('/:date', requireAuth, requireRole(['admin', 'super_admin']), async (c) 
  * GET /api/selections/:employeeId/:date/history - Get selection history (Admin only)
  */
 app.get('/:employeeId/:date/history', requireAuth, requireRole(['admin', 'super_admin']), async (c) => {
-  const employeeId = parseInt(c.req.param('employeeId'), 10);
-  const mealDate = c.req.param('date');
+  const employeeId = parseInt(c.req.param('employeeId')!, 10);
+  const mealDate = c.req.param('date')!;
   
   if (!employeeId || isNaN(employeeId)) {
     return c.json({ success: false, error: 'Invalid employee_id' }, 400);
@@ -150,7 +156,7 @@ app.post('/admin/override', requireAuth, requireRole(['admin', 'super_admin']), 
   const db = c.env.DB;
   const session = c.get('session');
   const adminId = session!.employee_id;
-  const ipAddress = c.req.header('X-Forwarded-For') || c.req.raw.remoteAddr || null;
+  const ipAddress = c.req.header('X-Forwarded-For') || null;
   
   const body = await c.req.json();
   const { employee_id, meal_date, choice, override_reason } = body;
@@ -190,18 +196,26 @@ app.post('/admin/override', requireAuth, requireRole(['admin', 'super_admin']), 
       ipAddress
     );
     
-    await logSelectionOverride(
-      db,
-      adminId,
-      employee_id,
-      meal_date,
-      result.beforeJson,
-      result.afterJson,
-      override_reason.trim(),
-      ipAddress
+    // Audit only a real change. Re-submitting an identical override (same
+    // choice, same reason) wrote nothing, so recording an audit entry for it
+    // would put "an admin changed this" in the trail when they did not.
+    if (result.changed) {
+      await logSelectionOverride(
+        db,
+        adminId,
+        employee_id,
+        meal_date,
+        result.beforeJson,
+        result.afterJson,
+        override_reason.trim(),
+        ipAddress
+      );
+    }
+
+    return c.json(
+      { success: true, data: result.selection, changed: result.changed },
+      result.changed && !result.beforeJson ? 201 : 200
     );
-    
-    return c.json({ success: true, data: result.selection }, result.beforeJson ? 200 : 201);
   } catch (error) {
     console.error('Error overriding selection:', error);
     return c.json({ success: false, error: 'Failed to override selection' }, 500);

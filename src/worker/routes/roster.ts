@@ -5,9 +5,11 @@
 
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types/env.js';
-import { requireAuth, requireRole } from '../lib/auth.js';
-import { getRosterEntry, getRosterEntriesForEmployee, getRosterEntriesByDate, upsertRosterEntry, deleteRosterEntry } from '../repositories/roster.repo.js';
+import { requireAuth, requireRole } from '../middleware/session.js';
+import { getRosterEntriesForEmployee, getRosterEntriesByDate, upsertRosterEntry, deleteRosterEntry } from '../repositories/roster.repo.js';
 import { logRosterChange } from '../services/audit.service.js';
+import { getCurrentBusinessDate } from '../services/settings.service.js';
+import { addBusinessDays, isValidBusinessDate } from '../lib/datetime.js';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -15,19 +17,29 @@ const app = new Hono<{ Bindings: Env; Variables: Variables }>();
  * GET /api/roster/me - Get current employee's roster entries
  * Employees can only see their own roster
  */
-app.get('/me', async (c) => {
+app.get('/me', requireAuth, async (c) => {
   const db = c.env.DB;
   const session = c.get('session');
+
+  // The employee id comes from the SESSION only. There is no code path here
+  // that accepts an employee id from the client, which is what makes "employee
+  // A cannot read employee B's roster" structural rather than a check to forget.
   const employeeId = session!.employee_id;
-  
-  // Get date range (next 30 days by default)
-  const today = new Date().toISOString().split('T')[0];
-  const endDateObj = new Date();
-  endDateObj.setDate(endDateObj.getDate() + 30);
-  const endDate = endDateObj.toISOString().split('T')[0];
-  
-  const entries = await getRosterEntriesForEmployee(db, employeeId, today, endDate);
-  
+
+  // Default range: the business day in the configured timezone, plus 30 days.
+  // Derived from the business date, not from the UTC date or the server's clock.
+  const startDate = c.req.query('from') ?? (await getCurrentBusinessDate(db));
+  if (!isValidBusinessDate(startDate)) {
+    return c.json({ success: false, error: 'Invalid from date. Use YYYY-MM-DD' }, 400);
+  }
+
+  const endDate = c.req.query('to') ?? addBusinessDays(startDate, 30);
+  if (!isValidBusinessDate(endDate)) {
+    return c.json({ success: false, error: 'Invalid to date. Use YYYY-MM-DD' }, 400);
+  }
+
+  const entries = await getRosterEntriesForEmployee(db, employeeId, startDate, endDate);
+
   return c.json({ success: true, data: entries });
 });
 
@@ -35,7 +47,7 @@ app.get('/me', async (c) => {
  * GET /api/roster/:date - Get all roster entries for a date (Admin only)
  */
 app.get('/:date', requireAuth, requireRole(['admin', 'super_admin']), async (c) => {
-  const workDate = c.req.param('date');
+  const workDate = c.req.param('date')!;
   
   if (!/^\d{4}-\d{2}-\d{2}$/.test(workDate)) {
     return c.json({ success: false, error: 'Invalid date format. Use YYYY-MM-DD' }, 400);
@@ -54,7 +66,7 @@ app.post('/', requireAuth, requireRole(['admin', 'super_admin']), async (c) => {
   const db = c.env.DB;
   const session = c.get('session');
   const actorId = session!.employee_id;
-  const ipAddress = c.req.header('X-Forwarded-For') || c.req.raw.remoteAddr || null;
+  const ipAddress = c.req.header('X-Forwarded-For') || null;
   
   const body = await c.req.json();
   const { employee_id, work_date, shift_value, source = 'manual' } = body;
@@ -101,10 +113,10 @@ app.delete('/:employeeId/:workDate', requireAuth, requireRole(['admin', 'super_a
   const db = c.env.DB;
   const session = c.get('session');
   const actorId = session!.employee_id;
-  const ipAddress = c.req.header('X-Forwarded-For') || c.req.raw.remoteAddr || null;
+  const ipAddress = c.req.header('X-Forwarded-For') || null;
   
-  const employeeId = parseInt(c.req.param('employeeId'), 10);
-  const workDate = c.req.param('workDate');
+  const employeeId = parseInt(c.req.param('employeeId')!, 10);
+  const workDate = c.req.param('workDate')!;
   
   if (!employeeId || isNaN(employeeId)) {
     return c.json({ success: false, error: 'Invalid employee_id' }, 400);

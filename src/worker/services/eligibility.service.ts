@@ -1,160 +1,157 @@
 /**
  * Eligibility Service Layer
- * Combines pure domain logic with database lookups
+ * Combines the pure domain logic with database lookups.
+ *
+ * The domain function (domain/eligibility.ts) decides IF an employee is eligible
+ * on a given date. This layer supplies it with real data, and answers the one
+ * question it structurally cannot: WHEN the employee is next eligible.
  */
 
 import type { D1Database } from '@cloudflare/workers-types';
-import type { Employee, EligibilityResponse, RosterEntry } from '../../shared/types/index.js';
+import type { Employee, EligibilityResponse } from '../../shared/types/index.js';
 import { computeEligibility, type EligibilityContext } from '../domain/eligibility.js';
 import { getRosterEntry, getFutureEligibleShifts, getPublishedMenuDates } from '../repositories/roster.repo.js';
-import { getMenuDayByDate } from '../repositories/menu.repo.js';
-import { getSetting } from './settings.service.js';
+import { getSetting, getTimezone } from './settings.service.js';
+import { getWeekday, type BusinessDate } from '../lib/datetime.js';
+
+const DEFAULT_WORKING_DAYS = [0, 1, 2, 3, 4]; // Sunday-Thursday
+
+export interface EligibilityConfig {
+  workingDays: number[];
+  holidays: Set<BusinessDate>;
+  timezone: string;
+}
 
 /**
- * Get full eligibility determination including next eligible date
- * This is the main service function that combines DB lookups with pure eligibility logic
+ * Load the configuration the eligibility rules depend on.
+ */
+export async function loadEligibilityConfig(db: D1Database): Promise<EligibilityConfig> {
+  const workingDaysSetting = await getSetting(db, 'working_days');
+  const timezone = await getTimezone(db);
+
+  let workingDays = DEFAULT_WORKING_DAYS;
+  if (workingDaysSetting) {
+    try {
+      const parsed = JSON.parse(workingDaysSetting.value) as unknown;
+      if (Array.isArray(parsed) && parsed.every((d) => typeof d === 'number')) {
+        workingDays = parsed as number[];
+      }
+    } catch {
+      console.error('Invalid working_days setting; falling back to Sunday-Thursday.');
+    }
+  }
+
+  // Holidays live in a dedicated table in a later phase; an empty set today.
+  const holidays = new Set<BusinessDate>();
+
+  return { workingDays, holidays, timezone };
+}
+
+/**
+ * Get full eligibility determination including the next eligible date.
  */
 export async function getEligibilityWithNextDate(
   db: D1Database,
   employee: Employee,
-  mealDate: string
+  mealDate: BusinessDate
 ): Promise<EligibilityResponse> {
-  // Get roster entry for the specific date (for shift employees)
-  const rosterEntry = employee.roster_type === 'shift' 
+  const rosterEntry = employee.roster_type === 'shift'
     ? await getRosterEntry(db, employee.id, mealDate)
     : null;
-  
-  // Get settings
-  const workingDaysSetting = await getSetting(db, 'working_days');
-  const timezoneSetting = await getSetting(db, 'timezone');
-  
-  const workingDays = workingDaysSetting ? JSON.parse(workingDaysSetting.value) as number[] : [0, 1, 2, 3, 4];
-  const _timezone = timezoneSetting?.value || 'Asia/Amman';
-  
-  // Get holidays (from settings or a dedicated table in future)
-  const holidays = new Set<string>();
-  
-  // Build context for pure eligibility calculation
+
+  const { workingDays, holidays } = await loadEligibilityConfig(db);
+
   const context: EligibilityContext = {
     employee,
     mealDate,
     rosterEntry,
     workingDays,
-    holidays
+    holidays,
   };
-  
-  // Compute base eligibility (pure function, no DB calls)
+
+  // Pure computation, no I/O.
   const baseResult = computeEligibility(context);
-  
-  // If ineligible and we can determine next eligible date, do so
+
   if (!baseResult.eligible) {
-    const nextDate = await findNextEligibleMealDate(
-      db,
-      employee,
-      mealDate,
-      workingDays,
-      holidays
-    );
-    
     return {
       ...baseResult,
-      nextEligibleDate: nextDate
+      nextEligibleDate: await findNextEligibleMealDate(db, employee, mealDate, workingDays, holidays),
     };
   }
-  
+
   return baseResult;
 }
 
 /**
- * Find the next eligible meal date for an employee
- * Searches forward through roster/menu data without arbitrary limits
+ * Find the next date on which this employee can actually take a meal.
+ *
+ * This is driven ENTIRELY by data that exists: published menu days, and (for
+ * shift employees) published roster entries. There is no calendar scan and no
+ * search horizon - not 365 days, not 90, not any number. The search space is the
+ * set of published menu dates, so:
+ *
+ *   - a genuinely eligible date two years out IS found, provided its menu is
+ *     published;
+ *   - when no future menu establishes an eligible meal, the answer is `null`
+ *     rather than an invented date.
+ *
+ * Returns null for Amman HQ and inactive employees, who are never eligible.
  */
 export async function findNextEligibleMealDate(
   db: D1Database,
   employee: Employee,
-  fromDate: string,
+  fromDate: BusinessDate,
   workingDays: number[],
-  holidays: Set<string>
-): Promise<string | null> {
-  // Amman HQ and inactive employees are never eligible
+  holidays: Set<BusinessDate>
+): Promise<BusinessDate | null> {
+  // Amman HQ employees never receive a company meal; inactive employees cannot
+  // select at all. Neither has a "next" date, and inventing one would be a lie.
   if (employee.roster_type === 'amman_hq' || !employee.is_active) {
     return null;
   }
-  
-  // Get future published menu dates
-  const publishedMenus = await getPublishedMenuDates(db, fromDate);
-  
-  if (publishedMenus.size === 0) {
-    return null; // No future menus published
+
+  // The candidate set: actual published menu dates, ascending, from today on.
+  const publishedMenuDates = await getPublishedMenuDates(db, fromDate);
+  if (publishedMenuDates.length === 0) {
+    return null;
   }
-  
-  // Regular employees: find next working day with published menu
+
   if (employee.roster_type === 'regular') {
-    let current = parseDate(fromDate);
-    
-    // Search up to 365 days ahead (practical limit for performance)
-    for (let i = 1; i <= 365; i++) {
-      current = addDays(current, 1);
-      const dateStr = formatDate(current);
-      
-      // Skip if not a working day
-      const weekday = getWeekday(dateStr);
-      if (!workingDays.includes(weekday)) {
+    // Walk the real published menu dates, not the calendar. The first one that
+    // is strictly after `fromDate`, falls on a configured working day, and is
+    // not a holiday, is the answer.
+    for (const menuDate of publishedMenuDates) {
+      if (menuDate <= fromDate) {
         continue;
       }
-      
-      // Skip if holiday
-      if (holidays.has(dateStr)) {
+      if (!workingDays.includes(getWeekday(menuDate))) {
         continue;
       }
-      
-      // Check if menu is published for this date
-      if (publishedMenus.has(dateStr)) {
-        return dateStr;
+      if (holidays.has(menuDate)) {
+        continue;
       }
+      return menuDate;
     }
-    
-    return null; // No eligible date found within search horizon
+    return null;
   }
-  
-  // Shift employees: find next Day/Night shift with published menu
+
   if (employee.roster_type === 'shift') {
+    // Intersect the employee's actual future Day/Night shifts (ascending) with
+    // the published menu dates. Both sides are real records.
+    const publishedMenuDateSet = new Set(publishedMenuDates);
     const futureShifts = await getFutureEligibleShifts(db, employee.id, fromDate);
-    
+
     for (const shift of futureShifts) {
-      // Check if menu is published for this shift date
-      if (publishedMenus.has(shift.work_date)) {
-        return shift.work_date;
+      if (!publishedMenuDateSet.has(shift.work_date)) {
+        continue;
       }
+      if (holidays.has(shift.work_date)) {
+        continue;
+      }
+      return shift.work_date;
     }
-    
-    return null; // No eligible shift with published menu found
+    return null;
   }
-  
+
   return null;
-}
-
-// Helper functions for date manipulation
-function getWeekday(dateString: string): number {
-  const [year, month, day] = dateString.split('-').map(Number);
-  const date = new Date(Date.UTC(year, month - 1, day));
-  return date.getUTCDay(); // 0=Sunday, 6=Saturday
-}
-
-function parseDate(dateString: string): Date {
-  const [year, month, day] = dateString.split('-').map(Number);
-  return new Date(Date.UTC(year, month - 1, day));
-}
-
-function addDays(date: Date, days: number): Date {
-  const result = new Date(date);
-  result.setUTCDate(result.getUTCDate() + days);
-  return result;
-}
-
-function formatDate(date: Date): string {
-  const year = date.getUTCFullYear();
-  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(date.getUTCDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
 }

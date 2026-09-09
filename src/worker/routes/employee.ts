@@ -4,7 +4,7 @@
 
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types/env.js';
-import { listEmployees, getEmployeeById } from '../db/employees.js';
+import { getEmployeeById } from '../db/employees.js';
 
 export const employeeRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
