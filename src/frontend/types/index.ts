@@ -180,3 +180,71 @@ export interface Holiday {
   created_at?: string;
   created_by?: number | null;
 }
+
+// ============================================================================
+// Imports (Phase 4 foundation)
+// ============================================================================
+
+export type ImportType = 'employees' | 'roster' | 'menu';
+
+export type ImportStatus =
+  | 'pending'
+  | 'validating'
+  | 'validation_failed'
+  | 'preview'
+  | 'committing'
+  | 'committed'
+  | 'commit_failed'
+  | 'cancelled';
+
+export type ImportRowStatus = 'valid' | 'warning' | 'invalid';
+
+/**
+ * An import batch as the API returns it.
+ *
+ * Note the absence of any storage key: the server reports `file_archived`
+ * rather than where the object lives.
+ */
+export interface ImportBatch {
+  id: number;
+  import_type: ImportType;
+  status: ImportStatus;
+  original_filename: string;
+  file_size_bytes: number | null;
+  content_sha256: string | null;
+  file_archived: boolean;
+  uploaded_by: number;
+  uploaded_by_name?: string | null;
+  uploaded_by_amco_id?: string | null;
+  committed_by: number | null;
+  total_rows: number;
+  valid_rows: number;
+  invalid_rows: number;
+  warning_rows: number;
+  failure_reason: string | null;
+  /** Server-supplied timestamps. Never recomputed in the browser. */
+  created_at: string;
+  validated_at: string | null;
+  committed_at: string | null;
+}
+
+export interface ImportPreviewRow {
+  row_number: number;
+  status: ImportRowStatus;
+  messages: string[];
+  preview: unknown;
+}
+
+export interface ImportDetail extends ImportBatch {
+  importer_available: boolean;
+  committer_available: boolean;
+  preview_rows: ImportPreviewRow[];
+  preview_row_limit: number;
+}
+
+export interface ImportList {
+  imports: ImportBatch[];
+  total: number;
+  limit: number;
+  offset: number;
+}

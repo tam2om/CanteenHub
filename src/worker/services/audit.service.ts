@@ -334,6 +334,41 @@ export async function logHolidayChange(
 }
 
 /**
+ * Create audit entry for an import operation.
+ *
+ * Records WHAT happened to WHICH batch. It deliberately never receives the
+ * uploaded file, so no workbook content, and nothing parsed out of one, can
+ * reach the audit table. The content hash is recorded because it identifies the
+ * file without revealing anything in it.
+ */
+export async function logImportChange(
+  db: D1Database,
+  actorId: number,
+  batchId: number,
+  action: 'CREATE' | 'VALIDATE' | 'COMMIT' | 'COMMIT_FAILED',
+  details: {
+    importType: string;
+    originalFilename?: string;
+    contentSha256?: string | null;
+    status?: string;
+    totalRows?: number;
+    invalidRows?: number;
+    reason?: string;
+  },
+  ipAddress: string | null = null
+): Promise<AuditLog> {
+  return logAudit(db, {
+    actorId,
+    action: `${action}_IMPORT`,
+    entityType: 'IMPORT_BATCH',
+    entityId: batchId,
+    beforeJson: null,
+    afterJson: JSON.stringify({ import_batch_id: batchId, ...details }),
+    ipAddress
+  });
+}
+
+/**
  * Create audit entry for employee change
  */
 export async function logEmployeeChange(

@@ -15,6 +15,7 @@ import { rosterRoutes } from './routes/roster.js';
 import { selectionRoutes } from './routes/selections.js';
 import { adminRoutes } from './routes/admin.js';
 import { meRoutes } from './routes/me.js';
+import { importRoutes } from './routes/imports.js';
 import { sessionMiddleware } from './middleware/session.js';
 
 // Create the main application
@@ -77,6 +78,10 @@ app.route('/api/selections', selectionRoutes);
 // Employee self-service routes for the portal. Identity always comes from the
 // session, never from the request.
 app.route('/api/me', meRoutes);
+
+// Admin import routes. Mounted BEFORE /api/admin so the more specific prefix
+// wins; the router applies requireAuth + requireRole to everything it owns.
+app.route('/api/admin/imports', importRoutes);
 
 // Admin routes (employees, password, settings, holidays).
 // The router applies requireAuth + requireRole to every endpoint it owns.
