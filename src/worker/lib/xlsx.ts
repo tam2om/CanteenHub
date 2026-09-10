@@ -261,6 +261,32 @@ function parseSheet(xml: string, sharedStrings: string[], name: string): Workshe
  * Sheet names are matched case-insensitively and whitespace-trimmed, because a
  * workbook saved by a person may well have a stray space.
  */
+/**
+ * List the worksheet names a workbook declares, in workbook order.
+ *
+ * Exists so a caller can CHOOSE a sheet rather than guess at its name. A menu
+ * workbook may hold both a lunch and a dinner sheet, and silently falling back
+ * to "the first sheet" is how a dinner menu gets imported as lunch.
+ */
+export async function listWorksheets(file: ArrayBuffer): Promise<string[]> {
+  const bytes = new Uint8Array(file);
+  const entries = readCentralDirectory(bytes);
+
+  const workbookEntry = entries.get('xl/workbook.xml');
+  if (!workbookEntry) {
+    throw new XlsxError('This file is not a readable Excel workbook.');
+  }
+
+  const workbookXml = await readEntry(bytes, workbookEntry);
+  const names: string[] = [];
+  const sheetRe = /<sheet\b([^>]*)\/?>/g;
+  let match: RegExpExecArray | null;
+  while ((match = sheetRe.exec(workbookXml)) !== null) {
+    names.push(decodeXmlText(/\bname="([^"]*)"/.exec(match[1])?.[1] ?? ''));
+  }
+  return names;
+}
+
 export async function readWorksheet(file: ArrayBuffer, sheetName: string): Promise<Worksheet> {
   const bytes = new Uint8Array(file);
   const entries = readCentralDirectory(bytes);
