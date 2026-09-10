@@ -301,3 +301,30 @@ export interface AdminMenuMonth {
   /** The server's business date. The browser never derives this itself. */
   today: string;
 }
+
+// ---------------------------------------------------------------------------
+// Admin lunch report
+// ---------------------------------------------------------------------------
+
+export interface ReportReasonCount {
+  reason: string;
+  label: string;
+  count: number;
+}
+
+export interface LunchReport {
+  date: string;
+  /** The IANA timezone the server resolved the business date in. */
+  timezone: string;
+  menu: { exists: boolean; published: boolean; status: string | null };
+  totals: { employees_considered: number; eligible: number; not_eligible: number };
+  selections: {
+    option_1: number;
+    option_2: number;
+    no_preference: number;
+    eligible_not_selected: number;
+    ineligible_with_selection: number;
+  };
+  eligibility: { by_reason: ReportReasonCount[] };
+  not_eligible: { by_reason: ReportReasonCount[] };
+}
