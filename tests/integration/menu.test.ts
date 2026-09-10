@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import app from '../../src/worker/index.js';
 import { createTestDb } from '../helpers/d1.js';
 import {
+  countRows,
   testEnv,
   seedEmployee,
   seedMenuDay,
@@ -38,9 +39,10 @@ describe('Menu API', () => {
 
   describe('menu day lifecycle', () => {
     it('authenticated admin can create a menu day', async () => {
+      // `status` is not accepted here - a new day is always a draft.
       const res = await app.request(
         `${BASE}/api/menu`,
-        jsonRequest({ meal_date: '2026-10-04', status: 'draft' }, admin.cookie),
+        jsonRequest({ meal_date: '2026-10-04' }, admin.cookie),
         env
       );
 
@@ -51,17 +53,50 @@ describe('Menu API', () => {
       expect(body.data.status).toBe('draft');
     });
 
-    it('admin can update an existing menu day', async () => {
+    it('creating an existing menu day again is a safe no-op', async () => {
       await app.request(`${BASE}/api/menu`, jsonRequest({ meal_date: '2026-10-04' }, admin.cookie), env);
       const res = await app.request(
         `${BASE}/api/menu`,
-        jsonRequest({ meal_date: '2026-10-04', status: 'published' }, admin.cookie),
+        jsonRequest({ meal_date: '2026-10-04' }, admin.cookie),
         env
       );
 
       expect(res.status).toBe(200);
-      const body = await readJson(res);
-      expect(body.data.status).toBe('published');
+      expect((await readJson(res)).data.status).toBe('draft');
+      expect(await countRows(db, 'SELECT COUNT(*) as n FROM menu_days')).toBe(1);
+    });
+
+    it('REFUSES to set status through the create endpoint', async () => {
+      // Publishing has its own endpoint, which checks the menu is complete and
+      // audits the transition. Allowing status here would bypass both.
+      const res = await app.request(
+        `${BASE}/api/menu`,
+        jsonRequest({ meal_date: '2026-10-06', status: 'published' }, admin.cookie),
+        env
+      );
+
+      expect(res.status).toBe(400);
+      expect((await readJson(res)).error).toMatch(/status cannot be set here/);
+      expect(await countRows(db, 'SELECT COUNT(*) as n FROM menu_days')).toBe(0);
+    });
+
+    it('does NOT unpublish a live menu when the day is created again', async () => {
+      // An administrator opening a published day for editing must not take it
+      // off the employees' screens as a side effect.
+      const menuDayId = await seedMenuDay(db, '2026-10-07', 'published');
+
+      const res = await app.request(
+        `${BASE}/api/menu`,
+        jsonRequest({ meal_date: '2026-10-07' }, admin.cookie),
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const after = await db
+        .prepare('SELECT status FROM menu_days WHERE id = ?')
+        .bind(menuDayId)
+        .first<{ status: string }>();
+      expect(after!.status).toBe('published');
     });
 
     it('rejects a menu day mutation from a non-admin employee', async () => {
@@ -75,6 +110,15 @@ describe('Menu API', () => {
 
     it('publish works and is audited', async () => {
       const menuDayId = await seedMenuDay(db, '2026-10-05', 'draft');
+      // A menu day is publishable only once it carries both options.
+      await db
+        .prepare("INSERT INTO menu_options (menu_day_id, option_number, name) VALUES (?, 1, 'Test Alpha')")
+        .bind(menuDayId)
+        .run();
+      await db
+        .prepare("INSERT INTO menu_options (menu_day_id, option_number, name) VALUES (?, 2, 'Test Beta')")
+        .bind(menuDayId)
+        .run();
 
       const res = await app.request(
         `${BASE}/api/menu/${menuDayId}/publish`,

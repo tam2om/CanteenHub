@@ -152,14 +152,12 @@ export async function upsertMenuDay(
   const beforeJson = existing ? JSON.stringify(existing) : null;
   
   if (existing) {
-    await db
-      .prepare(`
-        UPDATE menu_days
-        SET status = ?, updated_at = datetime('now')
-        WHERE meal_date = ?
-      `)
-      .bind(status, mealDate)
-      .run();
+    // Deliberately a no-op for an existing day: `status` applies on creation
+    // only. Status transitions belong to publishMenuDay/archiveMenuDay, which
+    // check the menu is complete and audit the change as a PUBLISH rather than
+    // an incidental UPDATE. Without this, ensuring a menu day exists before
+    // editing it would silently unpublish a live menu.
+    void status;
   } else {
     await db
       .prepare(`
@@ -317,6 +315,107 @@ export async function updateMenuComponent(
 /**
  * Publish menu day
  */
+/**
+ * Why a menu day may not be published yet, or null when it is ready.
+ *
+ * A lunch menu day is exactly two selectable options. Publishing one with a
+ * missing option puts a half-built menu in front of employees and, worse, in
+ * front of the caterer.
+ */
+export async function menuPublishBlocker(
+  db: D1Database,
+  menuDayId: number
+): Promise<string | null> {
+  const options = await db
+    .prepare('SELECT option_number, name FROM menu_options WHERE menu_day_id = ? ORDER BY option_number')
+    .bind(menuDayId)
+    .all<{ option_number: number; name: string }>();
+
+  const rows = options.results || [];
+  const byNumber = new Map(rows.map((row) => [row.option_number, row.name]));
+
+  const missing = ([1, 2] as const).filter((n) => {
+    const name = byNumber.get(n);
+    return name === undefined || name.trim() === '';
+  });
+
+  if (missing.length > 0) {
+    return `This menu cannot be published yet: Option ${missing.join(' and Option ')} ${
+      missing.length > 1 ? 'are' : 'is'
+    } missing. A lunch menu day needs both options.`;
+  }
+
+  return null;
+}
+
+/**
+ * Every menu day in a date range, WHATEVER its status, with options and
+ * components.
+ *
+ * Distinct from getUpcomingPublishedMenus, which is the employee-facing view
+ * and shows published days only. Administrators must see drafts - reviewing
+ * them is the whole point of the screen.
+ */
+export async function getMenuDaysInRange(
+  db: D1Database,
+  fromDate: string,
+  toDate: string
+): Promise<MenuDayWithDetails[]> {
+  const result = await db
+    .prepare(
+      `SELECT * FROM menu_days
+        WHERE meal_date >= ? AND meal_date <= ?
+        ORDER BY meal_date ASC`
+    )
+    .bind(fromDate, toDate)
+    .all<MenuDay>();
+
+  const days = result.results || [];
+  if (days.length === 0) return [];
+
+  // Two queries for the whole range rather than two per day: a month view of
+  // 31 days would otherwise cost 62 round trips against a 50-query budget.
+  const ids = days.map((day) => day.id);
+  const placeholders = ids.map(() => '?').join(', ');
+
+  const [optionRows, componentRows] = await Promise.all([
+    db
+      .prepare(
+        `SELECT * FROM menu_options WHERE menu_day_id IN (${placeholders})
+          ORDER BY menu_day_id, option_number`
+      )
+      .bind(...ids)
+      .all<MenuOption>(),
+    db
+      .prepare(
+        `SELECT * FROM menu_components WHERE menu_day_id IN (${placeholders})
+          ORDER BY menu_day_id, sort_order, id`
+      )
+      .bind(...ids)
+      .all<MenuComponent>(),
+  ]);
+
+  const optionsByDay = new Map<number, MenuOption[]>();
+  for (const option of optionRows.results || []) {
+    const list = optionsByDay.get(option.menu_day_id) ?? [];
+    list.push(option);
+    optionsByDay.set(option.menu_day_id, list);
+  }
+
+  const componentsByDay = new Map<number, MenuComponent[]>();
+  for (const component of componentRows.results || []) {
+    const list = componentsByDay.get(component.menu_day_id) ?? [];
+    list.push(component);
+    componentsByDay.set(component.menu_day_id, list);
+  }
+
+  return days.map((day) => ({
+    ...day,
+    options: optionsByDay.get(day.id) ?? [],
+    components: componentsByDay.get(day.id) ?? [],
+  }));
+}
+
 export async function publishMenuDay(
   db: D1Database,
   menuDayId: number
