@@ -25,7 +25,8 @@ import { hashPassword } from '../lib/auth.js';
 import { validatePassword } from '../lib/password.js';
 import { toPublicEmployee, toPublicEmployees } from '../lib/employeeView.js';
 import { isValidBusinessDate } from '../lib/datetime.js';
-import { getAllSettings, getSetting, updateSetting } from '../services/settings.service.js';
+import { getAllSettings, getCurrentBusinessDate, getSetting, updateSetting } from '../services/settings.service.js';
+import { buildLunchReport } from '../services/reports.service.js';
 import { listHolidays, upsertHoliday, deleteHoliday } from '../repositories/holidays.repo.js';
 import {
   logEmployeeChange,
@@ -424,6 +425,35 @@ app.delete('/holidays/:date', async (c) => {
   await logHolidayChange(db, actorId, date, JSON.stringify(deleted), null, 'DELETE', clientIp(c));
 
   return c.json({ success: true, message: 'Holiday removed' });
+});
+
+/**
+ * GET /api/admin/reports/lunch?date=YYYY-MM-DD - lunch report for one date
+ *
+ * Read-only, and deliberately unaudited: a report read changes nothing, and
+ * logging every view would bury the mutations the audit trail exists for.
+ *
+ * Counts only - no employee-level rows. Nobody needs a list of names to tell
+ * the caterer how many portions to cook, and the smallest response that answers
+ * the question is the one that cannot leak.
+ *
+ * Omitting `date` reports the server's current business date, so the browser
+ * never decides which day "today" is.
+ */
+app.get('/reports/lunch', async (c) => {
+  const db = c.env.DB;
+  const requested = c.req.query('date');
+
+  if (requested !== undefined && !isValidBusinessDate(requested)) {
+    return c.json({ success: false, error: 'Invalid date. Use YYYY-MM-DD' }, 400);
+  }
+
+  // A validated business date, always bound as a parameter downstream - never
+  // interpolated into SQL.
+  const date = requested ?? (await getCurrentBusinessDate(db));
+
+  const report = await buildLunchReport(db, date);
+  return c.json({ success: true, data: report });
 });
 
 export { app as adminRoutes };

@@ -39,21 +39,30 @@ class TestStatement {
   private readonly sql: string;
   private readonly bindings: unknown[];
   private readonly log: string[];
+  private readonly readLog: string[];
 
-  constructor(db: DatabaseSync, sql: string, bindings: unknown[] = [], log: string[] = []) {
+  constructor(
+    db: DatabaseSync,
+    sql: string,
+    bindings: unknown[] = [],
+    log: string[] = [],
+    readLog: string[] = []
+  ) {
     this.db = db;
     this.sql = sql;
     this.bindings = bindings;
     this.log = log;
+    this.readLog = readLog;
   }
 
   bind(...values: unknown[]): TestStatement {
     // Returns a NEW statement so the same prepared statement can be reused with
     // different bindings, matching D1 semantics.
-    return new TestStatement(this.db, this.sql, normalizeBindings(values), this.log);
+    return new TestStatement(this.db, this.sql, normalizeBindings(values), this.log, this.readLog);
   }
 
   async first<T = Row>(colName?: string): Promise<T | null> {
+    this.readLog.push(this.sql);
     const stmt = this.db.prepare(this.sql);
     const row = stmt.get(...(this.bindings as never[])) as Row | undefined;
     if (row === undefined) return null;
@@ -62,6 +71,7 @@ class TestStatement {
   }
 
   async all<T = Row>(): Promise<{ results: T[]; success: true; meta: Record<string, unknown> }> {
+    this.readLog.push(this.sql);
     const stmt = this.db.prepare(this.sql);
     const rows = stmt.all(...(this.bindings as never[])) as Row[];
     return { results: rows as T[], success: true, meta: {} };
@@ -95,13 +105,20 @@ class TestD1 {
    * `updated_at`, and second-granularity timestamps can collide anyway.
    */
   readonly executedWrites: string[] = [];
+  /**
+   * Every read statement actually executed, in order. D1 allows 50 queries per
+   * invocation on the free plan, so "does this scale with headcount?" is a
+   * correctness question, not a tuning one - and counting reads is the only way
+   * to answer it that a passing assertion cannot fake.
+   */
+  readonly executedReads: string[] = [];
 
   constructor(sqlite: DatabaseSync) {
     this.sqlite = sqlite;
   }
 
   prepare(sql: string): TestStatement {
-    return new TestStatement(this.sqlite, sql, [], this.executedWrites);
+    return new TestStatement(this.sqlite, sql, [], this.executedWrites, this.executedReads);
   }
 
   async batch<T = Row>(statements: TestStatement[]): Promise<Array<{ results: T[]; success: boolean; meta: Record<string, unknown> }>> {
@@ -138,7 +155,11 @@ class TestD1 {
 /**
  * Create a fresh in-memory database with the real schema applied.
  */
-export type TestD1Database = D1Database & { sqlite: DatabaseSync; executedWrites: string[] };
+export type TestD1Database = D1Database & {
+  sqlite: DatabaseSync;
+  executedWrites: string[];
+  executedReads: string[];
+};
 
 export function createTestDb(): TestD1Database {
   const sqlite = new DatabaseSync(':memory:');

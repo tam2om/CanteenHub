@@ -369,3 +369,51 @@ body {
 .changes__field { display: inline-block; min-width: 6rem; color: var(--muted); }
 .changes__from { text-decoration: line-through; color: var(--muted); }
 .changes__to { font-weight: 600; color: var(--accent); }
+
+/* ---------------------------------------------------------------------------
+   Report tables
+
+   The table scrolls inside its own container rather than widening the page:
+   on a phone the reason column is long, and a body that scrolls sideways loses
+   the rest of the report.
+   --------------------------------------------------------------------------- */
+.table-scroll {
+  overflow-x: auto;
+  margin-top: 0.75rem;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+
+.table th,
+.table td {
+  text-align: left;
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.table th {
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.table td:first-child {
+  white-space: normal;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
