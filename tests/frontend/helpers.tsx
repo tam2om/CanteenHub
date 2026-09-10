@@ -42,15 +42,24 @@ type RouteMap = Record<string, { status?: number; body: unknown }>;
 /**
  * Stub fetch with a path -> response map. Any unmapped path returns 404, so a
  * test can never accidentally pass because of a silently-successful call.
+ *
+ * A key may be prefixed with a method (`'POST /api/admin/imports'`) when one
+ * path serves more than one verb; the bare path still matches any method, so
+ * existing callers are unaffected.
  */
 export function stubFetch(
   routes: RouteMap,
   { delayPaths = [] as string[] }: { delayPaths?: string[] } = {}
 ) {
-  const impl = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+  const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     const path = url.split('?')[0];
-    const match = routes[url] ?? routes[path];
+    const method = (init?.method ?? 'GET').toUpperCase();
+    const match =
+      routes[`${method} ${url}`] ??
+      routes[`${method} ${path}`] ??
+      routes[url] ??
+      routes[path];
 
     if (!match) {
       return new Response(JSON.stringify({ success: false, error: 'Not Found' }), {

@@ -14,6 +14,10 @@
 import type { D1Database } from '@cloudflare/workers-types';
 import type { ImportType } from '../lib/importFile.js';
 import {
+  commitEmployeeWorkbook,
+  validateEmployeeWorkbook,
+} from '../imports/employees.js';
+import {
   getImportBatch,
   saveValidationResults,
   transitionStatus,
@@ -32,9 +36,16 @@ export interface ValidationOutcome {
 
 /**
  * A per-type validator. Later slices register employees/roster/menu here.
+ *
+ * Receives the database READ-ONLY by contract: classifying a row as CREATE,
+ * UPDATE or UNCHANGED requires comparing the workbook against what is already
+ * stored, and the preview is only honest if it reflects real current values.
  * A validator NEVER writes production data - it only inspects and stages.
  */
-export type ImportValidator = (file: ArrayBuffer) => Promise<ValidationOutcome>;
+export type ImportValidator = (
+  db: D1Database,
+  file: ArrayBuffer
+) => Promise<ValidationOutcome>;
 
 /**
  * A per-type committer, applying staged rows to production tables.
@@ -45,12 +56,18 @@ export type ImportCommitter = (db: D1Database, batch: ImportBatch) => Promise<vo
 /**
  * Registries for the per-domain importers.
  *
- * EMPTY ON PURPOSE. Employee, roster and menu parsing belong to their own
- * slices. Leaving these empty is what makes "the foundation cannot fake a
- * business import" true structurally rather than by convention.
+ * `employees` is registered as of Phase 4 Slice 2. `roster` and `menu` remain
+ * unregistered on purpose: an import type with no entry here reports
+ * not_implemented and can never reach a committed state, which is what keeps
+ * "the foundation cannot fake a business import" structurally true rather than
+ * a matter of convention.
  */
-export const VALIDATORS: Partial<Record<ImportType, ImportValidator>> = {};
-export const COMMITTERS: Partial<Record<ImportType, ImportCommitter>> = {};
+export const VALIDATORS: Partial<Record<ImportType, ImportValidator>> = {
+  employees: validateEmployeeWorkbook,
+};
+export const COMMITTERS: Partial<Record<ImportType, ImportCommitter>> = {
+  employees: commitEmployeeWorkbook,
+};
 
 export function hasValidator(importType: ImportType): boolean {
   return typeof VALIDATORS[importType] === 'function';
@@ -132,7 +149,7 @@ export async function validateImport(
 
   let outcome: ValidationOutcome;
   try {
-    outcome = await validator(file);
+    outcome = await validator(db, file);
   } catch (error) {
     // The message is operator-facing and must not carry file contents.
     console.error('Import validation threw for batch', batchId, error instanceof Error ? error.name : 'unknown');
