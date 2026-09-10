@@ -18,6 +18,7 @@ import { AdminRosterImportPage } from './pages/admin/AdminRosterImportPage.js';
 import { AdminMenuImportPage } from './pages/admin/AdminMenuImportPage.js';
 import { AdminMenuPage } from './pages/admin/AdminMenuPage.js';
 import { AdminReportsPage } from './pages/admin/AdminReportsPage.js';
+import { AdminRosterPage } from './pages/admin/AdminRosterPage.js';
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -96,6 +97,16 @@ export function App() {
           <RequireAdmin>
             <AdminLayout>
               <AdminRosterImportPage />
+            </AdminLayout>
+          </RequireAdmin>
+        }
+      />
+      <Route
+        path="/admin/roster"
+        element={
+          <RequireAdmin>
+            <AdminLayout>
+              <AdminRosterPage />
             </AdminLayout>
           </RequireAdmin>
         }
