@@ -209,6 +209,38 @@ export async function getSelectionHistory(
 }
 
 /**
+ * Selection history for ONE employee across all dates, newest first.
+ *
+ * Distinct from getSelectionHistory (single date, admin view): this backs the
+ * employee's own history screen. The employee id is always supplied by the
+ * caller from the session, never from the request, so there is no code path
+ * here that can be pointed at another employee.
+ */
+export async function getSelectionHistoryForEmployee(
+  db: D1Database,
+  employeeId: number,
+  limit: number,
+  offset: number
+): Promise<{ entries: LunchSelectionHistory[]; total: number }> {
+  const countRow = await db
+    .prepare('SELECT COUNT(*) as total FROM lunch_selection_history WHERE employee_id = ?')
+    .bind(employeeId)
+    .first<{ total: number }>();
+
+  const result = await db
+    .prepare(
+      `SELECT * FROM lunch_selection_history
+       WHERE employee_id = ?
+       ORDER BY meal_date DESC, id DESC
+       LIMIT ? OFFSET ?`
+    )
+    .bind(employeeId, limit, offset)
+    .all<LunchSelectionHistory>();
+
+  return { entries: result.results || [], total: Number(countRow?.total ?? 0) };
+}
+
+/**
  * Get all selections count by choice for a date (for reports)
  */
 export async function getSelectionCountsByDate(
