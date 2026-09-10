@@ -47,7 +47,7 @@ export function stubFetch(
   routes: RouteMap,
   { delayPaths = [] as string[] }: { delayPaths?: string[] } = {}
 ) {
-  const impl = vi.fn(async (input: RequestInfo | URL) => {
+  const impl = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     const path = url.split('?')[0];
     const match = routes[url] ?? routes[path];
@@ -73,6 +73,30 @@ export function stubFetch(
 
   vi.stubGlobal('fetch', impl);
   return impl;
+}
+
+export const ADMIN_USER = {
+  id: 900,
+  amco_id: 'TEST900',
+  full_name: 'Test Admin',
+  department: 'Facility & Site Support',
+  section: 'Common Management',
+  roster_type: 'regular' as const,
+  role: 'admin',
+};
+
+/** A synthetic employee row as the admin list API returns it. */
+export function adminEmployee(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 1,
+    amco_id: 'TEST001',
+    full_name: 'Portal Tester',
+    department: 'Mining',
+    section: 'Operations',
+    roster_type: 'regular',
+    is_active: 1,
+    ...overrides,
+  };
 }
 
 export const SESSION_USER = {

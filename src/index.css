@@ -245,3 +245,109 @@ body {
   .identity__name { font-size: 1.5rem; }
   .choice { min-height: 4rem; }
 }
+
+/* ==========================================================================
+   Admin portal
+   Extends the same tokens and components as the employee portal - no separate
+   design system. Tables give way to stacked cards on narrow screens, since an
+   administrator on a phone should still be able to find and edit someone.
+   ========================================================================== */
+
+.shell--admin { max-width: 60rem; }
+
+.header__tag {
+  font-size: 0.6875rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--accent);
+  border: 1px solid var(--accent); border-radius: 4px;
+  padding: 0.05rem 0.3rem; vertical-align: 0.1em;
+}
+
+.page__head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+
+/* ---------- filters ---------- */
+
+.filters {
+  display: flex; flex-wrap: wrap; gap: 0.75rem;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: var(--gap);
+}
+.field--inline { flex: 1 1 12rem; margin-bottom: 0; }
+.field--narrow { flex: 0 1 10rem; }
+
+/* ---------- list ---------- */
+
+.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.625rem; }
+.list--tight { gap: 0.375rem; margin-top: 0.75rem; }
+.list__count { margin: 0; font-size: 0.8125rem; color: var(--muted); }
+
+.list__item {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 0.75rem var(--gap);
+}
+.list__main { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
+.list__title { margin: 0; font-weight: 600; }
+.list__meta { margin: 0.125rem 0 0; font-size: 0.8125rem; color: var(--muted); }
+.list__tags { display: flex; gap: 0.375rem; flex-wrap: wrap; }
+
+.tag {
+  font-size: 0.75rem; font-weight: 600; padding: 0.15rem 0.5rem;
+  border-radius: 999px; background: var(--off-soft); color: var(--off);
+  border: 1px solid var(--border); white-space: nowrap;
+}
+.tag--ok  { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.tag--off { background: var(--warn-soft);   color: var(--warn);   border-color: var(--warn); }
+
+.list__actions {
+  display: flex; gap: 0.375rem; flex-wrap: wrap;
+  margin-top: 0.625rem; padding-top: 0.625rem; border-top: 1px solid var(--border);
+}
+
+/* ---------- panels (create / edit / password) ---------- */
+
+.panel {
+  margin-top: 0.75rem; padding: var(--gap);
+  background: var(--bg); border: 1px solid var(--accent); border-radius: var(--radius);
+}
+.panel__title { margin: 0 0 0.75rem; font-size: 1rem; }
+.panel__note { margin: 0.5rem 0 0; font-size: 0.8125rem; color: var(--muted); }
+.panel__actions { display: flex; gap: 0.5rem; margin-top: 1rem; }
+.panel__actions .button { flex: 1; }
+
+/* ---------- confirmation ---------- */
+
+.confirm {
+  margin-top: 0.75rem; padding: var(--gap);
+  background: var(--warn-soft); border: 1px solid var(--warn); border-radius: var(--radius);
+}
+.confirm__title { margin: 0; font-weight: 700; color: var(--warn); }
+.confirm__detail { margin: 0.375rem 0 0; font-size: 0.9375rem; }
+.confirm__actions { display: flex; gap: 0.5rem; margin-top: 0.875rem; }
+.confirm__actions .button { flex: 1; }
+
+/* ---------- settings ---------- */
+
+.setting__current { margin: 0 0 0.25rem; font-size: 1rem; }
+.setting__form { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-end; margin-top: 0.875rem; }
+
+/* ---------- pager ---------- */
+
+.pager { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-top: 0.25rem; }
+.pager__label { font-size: 0.8125rem; color: var(--muted); }
+
+/* ---------- button variants ---------- */
+
+.button--inline { width: auto; padding: 0 1rem; flex: none; }
+.button--small { width: auto; min-height: 2.25rem; padding: 0 0.75rem; font-size: 0.875rem; }
+.button--ghost {
+  background: var(--surface); color: var(--text); border: 1px solid var(--border);
+}
+.button--ghost:hover:not(:disabled) { border-color: var(--muted); }
+.button--ghost:disabled { opacity: 0.6; cursor: not-allowed; }
+.button--danger { background: var(--danger); color: #fff; }
+.button--danger:disabled { opacity: 0.6; cursor: not-allowed; }
+
+@media (min-width: 40rem) {
+  .list__main { flex-wrap: nowrap; }
+  .list__actions { border-top: none; padding-top: 0; margin-top: 0.5rem; }
+  .panel__actions .button, .confirm__actions .button { flex: 0 0 auto; min-width: 9rem; }
+}

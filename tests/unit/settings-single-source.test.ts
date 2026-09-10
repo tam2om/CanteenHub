@@ -89,6 +89,11 @@ describe('settings has a single source of truth', () => {
       AUTHORITATIVE,
       'src/worker/routes/admin.ts',
       'src/shared/types/index.ts',
+      // The admin settings screen reads this key to display and edit the
+      // configured value. It is a SURFACE for the setting, not a second
+      // implementation: it evaluates no cutoff and computes no business date.
+      // The single-definition assertions above still guard that invariant.
+      'src/frontend/pages/admin/AdminSettingsPage.tsx',
     ].sort();
 
     const readers = sourceFiles
