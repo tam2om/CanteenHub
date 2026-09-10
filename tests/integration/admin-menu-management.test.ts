@@ -369,6 +369,90 @@ describe('Admin menu management', () => {
   });
 
   // ==========================================================================
+  // PROTECTED FIELDS
+  // ==========================================================================
+
+  describe('protected fields', () => {
+    it('refuses EVERY status value, not just published', async () => {
+      // The create endpoint rejects the presence of the key, which is stronger
+      // than validating its value: no status can reach the repository at all.
+      for (const status of ['published', 'archived', 'draft', 'nonsense', '']) {
+        const res = await post('/api/menu', { meal_date: '2027-03-01', status });
+        expect(res.status).toBe(400);
+      }
+      expect(await countRows(db, 'SELECT COUNT(*) as n FROM menu_days')).toBe(0);
+    });
+
+    it('ignores client-supplied id, created_at and menu_day_id on an option', async () => {
+      const id = await seedFullMenu('2027-03-01');
+      const before = await db
+        .prepare('SELECT * FROM menu_options WHERE menu_day_id = ? AND option_number = 1')
+        .bind(id).first<Record<string, unknown>>();
+
+      await post(`/api/menu/${id}/options`, {
+        option_number: 1,
+        name: 'Renamed Alpha',
+        id: 99999,
+        created_at: '1999-01-01 00:00:00',
+        menu_day_id: 4242,
+      });
+
+      const after = await db
+        .prepare('SELECT * FROM menu_options WHERE menu_day_id = ? AND option_number = 1')
+        .bind(id).first<Record<string, unknown>>();
+
+      expect(after!.id).toBe(before!.id);
+      expect(after!.created_at).toBe(before!.created_at);
+      expect(after!.menu_day_id).toBe(id);
+      expect(after!.name).toBe('Renamed Alpha');
+    });
+
+    it('ignores client-supplied id and created_at on a component', async () => {
+      const id = await seedFullMenu('2027-03-01');
+      const created = (await readJson(
+        await post(`/api/menu/${id}/components`, { component_type: 'salad', name: 'Test Salad' })
+      )).data;
+
+      await post(`/api/menu/${id}/components`, {
+        component_id: created.id,
+        component_type: 'salad',
+        name: 'Renamed Salad',
+        id: 88888,
+        created_at: '1999-01-01 00:00:00',
+      });
+
+      const after = await db
+        .prepare('SELECT * FROM menu_components WHERE id = ?')
+        .bind(created.id).first<Record<string, unknown>>();
+
+      expect(after!.id).toBe(created.id);
+      expect(after!.created_at).toBe(created.created_at);
+      expect(after!.name).toBe('Renamed Salad');
+    });
+
+    it('cannot edit a component belonging to a DIFFERENT menu day', async () => {
+      const dayA = await seedFullMenu('2027-03-01');
+      const dayB = await seedFullMenu('2027-03-02');
+      const componentOfA = (await readJson(
+        await post(`/api/menu/${dayA}/components`, { component_type: 'salad', name: 'Belongs to A' })
+      )).data;
+
+      const res = await post(`/api/menu/${dayB}/components`, {
+        component_id: componentOfA.id,
+        component_type: 'salad',
+        name: 'Hijacked',
+      });
+
+      expect(res.status).toBe(404);
+      const after = await db
+        .prepare('SELECT name, menu_day_id FROM menu_components WHERE id = ?')
+        .bind(componentOfA.id).first<{ name: string; menu_day_id: number }>();
+      expect(after!.name).toBe('Belongs to A');
+      expect(after!.menu_day_id).toBe(dayA);
+    });
+  });
+
+  // ==========================================================================
   // EMPLOYEE VISIBILITY
   // ==========================================================================
 
@@ -408,6 +492,41 @@ describe('Admin menu management', () => {
 
       expect((await get('/api/menu/2027-03-01', employee.cookie)).status).toBe(404);
       expect((await select('2027-03-01', employee.cookie)).status).toBe(400);
+    });
+
+    it('a published menu stays visible and selectable through EVERY edit', async () => {
+      const id = await seedFullMenu('2027-03-01', 'published');
+
+      // Ensuring the day exists, then editing both options and a component.
+      await post('/api/menu', { meal_date: '2027-03-01' });
+      expect(await menuStatus('2027-03-01')).toBe('published');
+      await post(`/api/menu/${id}/options`, { option_number: 1, name: 'New Alpha' });
+      expect(await menuStatus('2027-03-01')).toBe('published');
+      await post(`/api/menu/${id}/options`, { option_number: 2, name: 'New Beta' });
+      expect(await menuStatus('2027-03-01')).toBe('published');
+      await post(`/api/menu/${id}/components`, { component_type: 'salad', name: 'Test Salad' });
+      expect(await menuStatus('2027-03-01')).toBe('published');
+
+      // The employee still sees it, and sees the corrected content.
+      const view = await get('/api/menu/2027-03-01', employee.cookie);
+      expect(view.status).toBe(200);
+      const body = await readJson(view);
+      expect(body.data.options.find((o: { option_number: number }) => o.option_number === 1).name)
+        .toBe('New Alpha');
+
+      expect((await select('2027-03-01', employee.cookie)).status).toBeLessThan(300);
+    });
+
+    it('a DRAFT surfaces through no employee-facing path at all', async () => {
+      await seedFullMenu('2027-03-01', 'draft');
+
+      const today = await readJson(await get('/api/me/today', employee.cookie));
+      expect(today.data.menu).toBeNull();
+      expect(today.data.canSelect).toBe(false);
+
+      // Nor as an upcoming menu, which is what the next-eligible-date walk uses.
+      const upcoming = await readJson(await get('/api/menu/upcoming?from=2027-01-01', employee.cookie));
+      expect(upcoming.data).toHaveLength(0);
     });
 
     it('an ADMIN can see a draft even though an employee cannot', async () => {
