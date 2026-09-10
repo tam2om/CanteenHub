@@ -46,7 +46,13 @@ export function AdminLayout({ children }: { children: ReactNode }) {
             to="/admin/imports/employees"
             className={({ isActive }) => `nav__link ${isActive ? 'nav__link--active' : ''}`}
           >
-            Imports
+            Employee import
+          </NavLink>
+          <NavLink
+            to="/admin/imports/roster"
+            className={({ isActive }) => `nav__link ${isActive ? 'nav__link--active' : ''}`}
+          >
+            Roster import
           </NavLink>
           <NavLink
             to="/admin/settings"
