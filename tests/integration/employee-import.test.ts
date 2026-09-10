@@ -496,6 +496,55 @@ describe('Employee Excel import', () => {
       expect(db.executedWrites.filter((sql) => /employees/i.test(sql))).toEqual([]);
     });
 
+    it('COMMIT is the only step that writes to employees', async () => {
+      // Upload, validate and preview must all leave production employee rows
+      // alone; the batch is staged in import_batch_rows, never applied.
+      const snapshot = await db
+        .prepare('SELECT * FROM employees ORDER BY id')
+        .all<Record<string, unknown>>();
+
+      db.executedWrites.length = 0;
+
+      const res = await uploadWorkbook(buildEmployeeWorkbook([ROW_A, ROW_B]));
+      const batch = (await readJson(res)).data as { id: number };
+      expect(db.executedWrites.filter((sql) => /\bemployees\b/i.test(sql))).toEqual([]);
+
+      await validate(batch.id);
+      expect(db.executedWrites.filter((sql) => /\bemployees\b/i.test(sql))).toEqual([]);
+
+      await preview(batch.id);
+      expect(db.executedWrites.filter((sql) => /\bemployees\b/i.test(sql))).toEqual([]);
+
+      // The staged rows exist, so the work really was done - it just was not applied.
+      expect(
+        await countRows(db, 'SELECT COUNT(*) as n FROM import_batch_rows WHERE import_batch_id = ?', batch.id)
+      ).toBe(2);
+      const unchanged = await db
+        .prepare('SELECT * FROM employees ORDER BY id')
+        .all<Record<string, unknown>>();
+      expect(unchanged.results).toEqual(snapshot.results);
+
+      // Only now does anything land.
+      await commit(batch.id);
+      expect(db.executedWrites.filter((sql) => /\bemployees\b/i.test(sql)).length).toBeGreaterThan(0);
+      expect(await employeeRow('TEST100')).not.toBeNull();
+    });
+
+    it('validating an INVALID workbook writes no employee row either', async () => {
+      const snapshot = await db
+        .prepare('SELECT * FROM employees ORDER BY id')
+        .all<Record<string, unknown>>();
+
+      db.executedWrites.length = 0;
+      await uploadAndValidate([ROW_A, ['TEST999', 'Bad', '', '', 'Nonsense']]);
+
+      expect(db.executedWrites.filter((sql) => /\bemployees\b/i.test(sql))).toEqual([]);
+      const after = await db
+        .prepare('SELECT * FROM employees ORDER BY id')
+        .all<Record<string, unknown>>();
+      expect(after.results).toEqual(snapshot.results);
+    });
+
     it('refuses to commit a workbook containing any invalid row', async () => {
       const { id } = await uploadAndValidate([ROW_A, ['TEST999', 'Bad', '', '', 'Nonsense']]);
 
