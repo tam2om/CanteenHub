@@ -248,6 +248,21 @@ describe('Shift roster Excel import', () => {
       expect((await previewRows(id))[0].preview.days[0].work_date).toBe('2028-02-29');
     });
 
+    it('rejects an impossible date: April 31', async () => {
+      const { body } = await uploadAndValidate([rosterRow('TEST100', 4, YEAR, { 31: 'Day' })]);
+      expect(body.data.outcome).toBe('failed');
+    });
+
+    it('rejects a FRACTIONAL month or year, while still accepting Excel\'s .0', async () => {
+      // "3.0" is Excel writing 3; "3.5" is not a month and must not truncate to 3.
+      expect((await uploadAndValidate([rosterRow('TEST100', '3.5', YEAR, { 1: 'Day' })])).body.data.outcome)
+        .toBe('failed');
+      expect((await uploadAndValidate([rosterRow('TEST100', MONTH, '2027.5', { 1: 'Day' })])).body.data.outcome)
+        .toBe('failed');
+      expect((await uploadAndValidate([rosterRow('TEST100', '03.0', YEAR, { 1: 'Day' })])).body.data.outcome)
+        .toBe('ready');
+    });
+
     it('rejects an invalid month', async () => {
       const { id, body } = await uploadAndValidate([rosterRow('TEST100', 13, YEAR, { 1: 'Day' })]);
       expect(body.data.outcome).toBe('failed');
@@ -295,6 +310,28 @@ describe('Shift roster Excel import', () => {
       ]);
       expect(body.data.outcome).toBe('failed');
       expect((await previewRows(id))[0].messages.join(' ')).toContain('unsupported shift value');
+    });
+
+    it('rejects a single-letter abbreviation rather than guessing at it', async () => {
+      // "O" could be Off or a typo; "N" could be Night or "No". A loud error
+      // the administrator can fix beats a quiet guess about who gets fed.
+      const { id, body } = await uploadAndValidate([
+        rosterRow('TEST100', MONTH, YEAR, { 1: 'D', 2: 'N', 3: 'O' }),
+      ]);
+      expect(body.data.outcome).toBe('failed');
+      expect((await previewRows(id))[0].messages.join(' ')).toContain('unsupported shift value');
+      expect(await countRows(db, 'SELECT COUNT(*) as n FROM roster_entries')).toBe(0);
+    });
+
+    it('a whitespace-only cell is blank, not a value', async () => {
+      const { id, body } = await uploadAndValidate([
+        rosterRow('TEST100', MONTH, YEAR, { 1: 'Day', 2: '   ' }),
+      ]);
+      expect(body.data.outcome).toBe('ready');
+      await commit(id);
+      // Only day 1 was represented; the padded cell wrote nothing at all.
+      expect(await countRows(db, 'SELECT COUNT(*) as n FROM roster_entries')).toBe(1);
+      expect(await entry(shiftWorker.id, '2027-03-02')).toBeNull();
     });
 
     it('treats a blank day cell as "not represented", not as Off', async () => {
@@ -448,6 +485,18 @@ describe('Shift roster Excel import', () => {
       }
     });
 
+    it('rejects a duplicate employee/date even when the VALUE is identical', async () => {
+      // Deduplicating silently would hide a workbook that is wrong about how
+      // many times a person appears.
+      const { id, body } = await uploadAndValidate([
+        rosterRow('TEST100', MONTH, YEAR, { 1: 'Day' }),
+        rosterRow('TEST100', MONTH, YEAR, { 1: 'Day' }),
+      ]);
+      expect(body.data.outcome).toBe('failed');
+      expect(body.data.invalid_rows).toBe(2);
+      expect((await previewRows(id))[0].messages.join(' ')).toContain('appears more than once');
+    });
+
     it('allows the same employee across DIFFERENT months', async () => {
       const { body } = await uploadAndValidate([
         rosterRow('TEST100', 3, YEAR, { 1: 'Day' }),
@@ -577,6 +626,66 @@ describe('Shift roster Excel import', () => {
       expect(res.status).toBe(409);
       // The valid row was NOT partially applied.
       expect(await countRows(db, 'SELECT COUNT(*) as n FROM roster_entries')).toBe(0);
+    });
+
+    it('an upsert preserves the row id, employee, date and created_at', async () => {
+      await db
+        .prepare(
+          `INSERT INTO roster_entries (employee_id, work_date, shift_value, source, created_at)
+           VALUES (?, '2027-03-01', 'off', 'manual', '2020-01-01 00:00:00')`
+        )
+        .bind(shiftWorker.id)
+        .run();
+      const before = await entry(shiftWorker.id, '2027-03-01');
+
+      const { id } = await uploadAndValidate([rosterRow('TEST100', MONTH, YEAR, { 1: 'Day' })]);
+      await commit(id);
+
+      const after = await entry(shiftWorker.id, '2027-03-01');
+      // ON CONFLICT DO UPDATE touches shift_value, source, updated_at and
+      // deleted_at only - never the identity columns or created_at.
+      expect(after!.id).toBe(before!.id);
+      expect(after!.employee_id).toBe(before!.employee_id);
+      expect(after!.work_date).toBe(before!.work_date);
+      expect(after!.created_at).toBe(before!.created_at);
+      expect(after!.shift_value).toBe('day');
+      // Still exactly one row: an upsert, never a delete-and-reinsert.
+      expect(await countRows(db, 'SELECT COUNT(*) as n FROM roster_entries')).toBe(1);
+    });
+
+    it('a failure INSIDE the batch rolls back the earlier successful write', async () => {
+      const { id } = await uploadAndValidate([
+        rosterRow('TEST100', MONTH, YEAR, { 1: 'Day', 2: 'Night' }),
+      ]);
+
+      // Corrupt the staged row so the SECOND write violates the shift_value
+      // CHECK constraint at write time, while the first would have succeeded.
+      // This exercises rollback inside db.batch() itself, which a failure
+      // before the batch (an employee vanishing) cannot reach.
+      const staged = await db
+        .prepare('SELECT preview_json FROM import_batch_rows WHERE import_batch_id = ?')
+        .bind(id)
+        .first<{ preview_json: string }>();
+      const parsed = JSON.parse(staged!.preview_json);
+      parsed.days[1].to = 'holiday';
+      await db
+        .prepare('UPDATE import_batch_rows SET preview_json = ? WHERE import_batch_id = ?')
+        .bind(JSON.stringify(parsed), id)
+        .run();
+
+      const res = await commit(id);
+      expect(res.status).toBe(500);
+
+      // The FIRST day's write must be gone too: all or nothing.
+      expect(await entry(shiftWorker.id, '2027-03-01')).toBeNull();
+      expect(await countRows(db, 'SELECT COUNT(*) as n FROM roster_entries')).toBe(0);
+
+      const batchRow = await db
+        .prepare('SELECT status, committed_at FROM import_batches WHERE id = ?')
+        .bind(id)
+        .first<{ status: string; committed_at: string | null }>();
+      expect(batchRow!.status).toBe('commit_failed');
+      expect(batchRow!.committed_at).toBeNull();
     });
 
     it('commits atomically: a failed write applies nothing', async () => {

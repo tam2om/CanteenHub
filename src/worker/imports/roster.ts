@@ -56,14 +56,16 @@ const REQUIRED_COLUMNS = ['amco_id', 'month', 'year'] as const;
  * Matched case-insensitively after whitespace collapsing. Anything unrecognised
  * is REJECTED - never coerced to a default, because guessing here would decide
  * whether a real person is fed.
+ *
+ * Deliberately only the three words the real workbook uses. Single-letter
+ * abbreviations are NOT accepted: a stray "O" or "N" left in a cell would
+ * otherwise become a real shift silently, and a loud validation error the
+ * administrator can fix is strictly better than a quiet guess.
  */
 const SHIFT_VALUES: Record<string, ShiftValue> = {
   off: 'off',
   day: 'day',
   night: 'night',
-  d: 'day',
-  n: 'night',
-  o: 'off',
 };
 
 /** Month names, so a workbook written as "March" is read rather than rejected. */
