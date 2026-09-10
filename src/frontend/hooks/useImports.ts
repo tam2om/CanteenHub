@@ -1,9 +1,9 @@
 /**
  * Import data hooks.
  *
- * Foundation only: these back a future import UI. No screen consumes them yet,
- * because the employee/roster/menu parsers do not exist and this slice will not
- * ship a workflow that pretends they do.
+ * Shared by every import screen. The employee import consumes them today; the
+ * roster and menu importers do not exist yet, so nothing here is specialised to
+ * one import type.
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
