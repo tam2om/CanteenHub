@@ -187,3 +187,46 @@ export function buildEmployeeWorkbook(
 ): Uint8Array {
   return buildWorkbook([{ name: sheetName, rows: [headers, ...rows] }]);
 }
+
+/**
+ * Header row for the wide-month shift roster sheet: the three identity columns
+ * followed by one column per day of the month.
+ */
+export function rosterHeaders(days = 31): string[] {
+  return ['code', 'month', 'year', ...Array.from({ length: days }, (_, i) => String(i + 1))];
+}
+
+/**
+ * A synthetic shift roster workbook in the real wide-month shape.
+ *
+ * Each row is `[code, month, year, ...dayValues]`; a null or '' day cell is
+ * written as a genuinely empty cell, which is how "this workbook says nothing
+ * about that date" is expressed.
+ */
+export function buildRosterWorkbook(
+  rows: Array<Array<string | null>>,
+  {
+    sheetName = 'Shifts roster',
+    headers = rosterHeaders(),
+  }: { sheetName?: string; headers?: string[] } = {}
+): Uint8Array {
+  return buildWorkbook([{ name: sheetName, rows: [headers, ...rows] }]);
+}
+
+/**
+ * Build one roster row from a map of day number -> shift value, so a test can
+ * say "day 3 is Night" without writing 31 cells.
+ */
+export function rosterRow(
+  code: string,
+  month: string | number,
+  year: string | number,
+  days: Record<number, string>,
+  dayCount = 31
+): Array<string | null> {
+  const cells: Array<string | null> = [code, String(month), String(year)];
+  for (let day = 1; day <= dayCount; day += 1) {
+    cells.push(days[day] ?? null);
+  }
+  return cells;
+}

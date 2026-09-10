@@ -17,6 +17,7 @@ import {
   commitEmployeeWorkbook,
   validateEmployeeWorkbook,
 } from '../imports/employees.js';
+import { commitRosterWorkbook, validateRosterWorkbook } from '../imports/roster.js';
 import {
   getImportBatch,
   saveValidationResults,
@@ -56,17 +57,19 @@ export type ImportCommitter = (db: D1Database, batch: ImportBatch) => Promise<vo
 /**
  * Registries for the per-domain importers.
  *
- * `employees` is registered as of Phase 4 Slice 2. `roster` and `menu` remain
- * unregistered on purpose: an import type with no entry here reports
- * not_implemented and can never reach a committed state, which is what keeps
- * "the foundation cannot fake a business import" structurally true rather than
- * a matter of convention.
+ * `employees` is registered as of Phase 4 Slice 2, `roster` as of Slice 3.
+ * `menu` remains unregistered on purpose: an import type with no entry here
+ * reports not_implemented and can never reach a committed state, which is what
+ * keeps "the foundation cannot fake a business import" structurally true rather
+ * than a matter of convention.
  */
 export const VALIDATORS: Partial<Record<ImportType, ImportValidator>> = {
   employees: validateEmployeeWorkbook,
+  roster: validateRosterWorkbook,
 };
 export const COMMITTERS: Partial<Record<ImportType, ImportCommitter>> = {
   employees: commitEmployeeWorkbook,
+  roster: commitRosterWorkbook,
 };
 
 export function hasValidator(importType: ImportType): boolean {
