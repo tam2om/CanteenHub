@@ -9,6 +9,10 @@ import { LoginPage } from './pages/LoginPage.js';
 import { EmployeeDashboard } from './pages/EmployeeDashboard.js';
 import { SelectionHistoryPage } from './pages/SelectionHistoryPage.js';
 import { ProfilePage } from './pages/ProfilePage.js';
+import { RequireAdmin } from './components/RequireAdmin.js';
+import { AdminLayout } from './components/AdminLayout.js';
+import { AdminEmployeesPage } from './pages/admin/AdminEmployeesPage.js';
+import { AdminSettingsPage } from './pages/admin/AdminSettingsPage.js';
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -52,6 +56,33 @@ export function App() {
               <ProfilePage />
             </AuthenticatedLayout>
           </RequireAuth>
+        }
+      />
+
+      {/* Admin area. RequireAdmin is a UX affordance; every /api/admin endpoint
+          independently enforces requireAuth + requireRole server-side. */}
+      <Route
+        path="/admin"
+        element={<Navigate to="/admin/employees" replace />}
+      />
+      <Route
+        path="/admin/employees"
+        element={
+          <RequireAdmin>
+            <AdminLayout>
+              <AdminEmployeesPage />
+            </AdminLayout>
+          </RequireAdmin>
+        }
+      />
+      <Route
+        path="/admin/settings"
+        element={
+          <RequireAdmin>
+            <AdminLayout>
+              <AdminSettingsPage />
+            </AdminLayout>
+          </RequireAdmin>
         }
       />
 
