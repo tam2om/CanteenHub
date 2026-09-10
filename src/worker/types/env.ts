@@ -2,13 +2,17 @@
  * Cloudflare Worker Environment Types
  */
 
-import type { D1Database } from '@cloudflare/workers-types';
+import type { D1Database, R2Bucket } from '@cloudflare/workers-types';
 import type { EmployeeWithRole, SessionData } from '../../shared/types/index.js';
 
 export interface Env {
   // Cloudflare Bindings
   DB: D1Database;
-  // BUCKET?: R2Bucket;  // Phase 2
+
+  // R2 bucket holding the original uploaded import files. Optional in the type
+  // so a deployment without the binding fails with a clear, handled error
+  // rather than a runtime crash deep inside a request.
+  IMPORTS?: R2Bucket;
   
   // Environment Variables
   ENVIRONMENT: 'local' | 'production';

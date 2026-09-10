@@ -21,9 +21,12 @@ export interface SeededEmployee {
   cookie: string;
 }
 
-export function testEnv(db: D1Database): Env {
+export function testEnv(db: D1Database, bucket?: unknown): Env {
   return {
     DB: db,
+    // Present only when a test supplies one, so the "storage not configured"
+    // path stays reachable.
+    ...(bucket === undefined ? {} : { IMPORTS: bucket }),
     ENVIRONMENT: 'local',
     FRONTEND_URL: 'http://localhost:5173',
   } as unknown as Env;

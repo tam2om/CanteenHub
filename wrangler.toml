@@ -11,6 +11,12 @@ binding = "DB"
 database_name = "canteenhub-local"
 database_id = "local-dev"
 
+# R2 bucket binding - archival of original uploaded import files.
+# D1 stores only metadata and the object key; the workbook binary lives here.
+[[r2_buckets]]
+binding = "IMPORTS"
+bucket_name = "canteenhub-imports-local"
+
 # Environment variables (do NOT put secrets here)
 [vars]
 ENVIRONMENT = "local"
@@ -22,3 +28,7 @@ name = "canteenhub-prod"
 
 [env.production.vars]
 ENVIRONMENT = "production"
+
+[[env.production.r2_buckets]]
+binding = "IMPORTS"
+bucket_name = "canteenhub-imports"
