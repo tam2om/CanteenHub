@@ -789,6 +789,157 @@ describe('Lunch menu Excel import', () => {
   });
 
   // ==========================================================================
+  // DRAFT SAFETY - an imported menu must not become selectable by accident
+  // ==========================================================================
+
+  describe('draft safety', () => {
+    it('an imported draft is INVISIBLE to employees and cannot be selected', async () => {
+      const employee = await seedEmployee(db, { amcoId: 'TEST100', rosterType: 'regular' });
+
+      const { id } = await uploadAndValidate([ROW_A]);
+      await commit(id);
+
+      expect((await menuDay('2027-03-01'))!.status).toBe('draft');
+
+      // The date is not exposed by the menu API at all.
+      const menuRead = await app.request(
+        `${BASE}/api/menu/2027-03-01`,
+        { headers: { Cookie: employee.cookie } },
+        env
+      );
+      expect(menuRead.status).toBe(404);
+
+      // Nor by the employee's own view of the day.
+      const today = await readJson(
+        await app.request(`${BASE}/api/me/today`, { headers: { Cookie: employee.cookie } }, env)
+      );
+      expect(today.data.menu).toBeNull();
+      expect(today.data.canSelect).toBe(false);
+
+      // And a selection against it is refused outright.
+      const selection = await app.request(
+        `${BASE}/api/selections/me`,
+        {
+          method: 'POST',
+          headers: { Cookie: employee.cookie, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ meal_date: '2027-03-01', choice: 'option_1' }),
+        },
+        env
+      );
+      expect(selection.status).toBe(400);
+      expect((await readJson(selection)).error).toBe('Menu is not yet published');
+      expect(await countRows(db, 'SELECT COUNT(*) as n FROM lunch_selections')).toBe(0);
+    });
+
+    it('the import never issues a publish', async () => {
+      await seedMenu('2027-03-02', 'Test Main Gamma', 'Test Main Delta', 'draft');
+
+      const { id } = await uploadAndValidate([ROW_A, ROW_B]);
+      db.executedWrites.length = 0;
+      await commit(id);
+
+      // No statement sets a MENU status. (The import batch's own
+      // pending -> committing -> committed transitions are a different table
+      // and are expected.)
+      const menuStatusWrites = db.executedWrites.filter(
+        (sql) => /menu_days/i.test(sql) && /status\s*=/i.test(sql)
+      );
+      expect(menuStatusWrites).toEqual([]);
+      expect(await countRows(db, "SELECT COUNT(*) as n FROM menu_days WHERE status = 'published'")).toBe(0);
+    });
+  });
+
+  // ==========================================================================
+  // SCHEMA-LEVEL GUARANTEES
+  // ==========================================================================
+
+  describe('schema guarantees', () => {
+    it('lunch_selections do NOT cascade from menu_days - the decoupling is real', async () => {
+      const employee = await seedEmployee(db, { amcoId: 'TEST100' });
+      const dayId = await seedMenu('2027-03-01', 'Test Alpha', 'Test Beta', 'published');
+      await db
+        .prepare(
+          `INSERT INTO lunch_selections (employee_id, meal_date, choice, source)
+           VALUES (?, '2027-03-01', 'option_1', 'employee')`
+        )
+        .bind(employee.id)
+        .run();
+
+      // Even the most destructive menu operation there is cannot reach a
+      // selection: there is no foreign key from selections to menu rows.
+      await db.prepare('DELETE FROM menu_days WHERE id = ?').bind(dayId).run();
+
+      expect(await countRows(db, 'SELECT COUNT(*) as n FROM menu_options')).toBe(0);
+      expect(await countRows(db, 'SELECT COUNT(*) as n FROM lunch_selections')).toBe(1);
+    });
+
+    it('the schema itself refuses a third option_number', async () => {
+      const dayId = await seedMenu('2027-03-01', 'Test Alpha', 'Test Beta');
+      let refused = false;
+      try {
+        await db
+          .prepare('INSERT INTO menu_options (menu_day_id, option_number, name) VALUES (?, 3, ?)')
+          .bind(dayId, 'Third Option')
+          .run();
+      } catch {
+        refused = true;
+      }
+      expect(refused).toBe(true);
+    });
+
+    it('an option UPDATE keeps its row id, description and created_at', async () => {
+      const dayId = await seedMenu('2027-03-01', 'Old Alpha', 'Old Beta');
+      await db
+        .prepare(
+          `UPDATE menu_options SET description = 'Keep me', created_at = '2020-01-01 00:00:00'
+            WHERE menu_day_id = ? AND option_number = 1`
+        )
+        .bind(dayId)
+        .run();
+      const before = await db
+        .prepare('SELECT * FROM menu_options WHERE menu_day_id = ? AND option_number = 1')
+        .bind(dayId)
+        .first<Record<string, unknown>>();
+
+      const { id } = await uploadAndValidate([ROW_A]);
+      await commit(id);
+
+      const after = await db
+        .prepare('SELECT * FROM menu_options WHERE menu_day_id = ? AND option_number = 1')
+        .bind(dayId)
+        .first<Record<string, unknown>>();
+
+      // ON CONFLICT DO UPDATE touches `name` only. The workbook has no
+      // description column, so an existing one is left alone rather than nulled.
+      expect(after!.id).toBe(before!.id);
+      expect(after!.description).toBe('Keep me');
+      expect(after!.created_at).toBe(before!.created_at);
+      expect(after!.name).toBe('Test Main Alpha');
+      expect(await countRows(db, 'SELECT COUNT(*) as n FROM menu_options')).toBe(2);
+    });
+
+    it('a repeated component with an omitted sibling writes NOTHING', async () => {
+      await seedMenu('2027-03-01', 'Test Main Alpha', 'Test Main Beta', 'draft', [
+        ['dessert', 'Keep Dessert'],
+        ['salad', 'Same Salad'],
+      ]);
+
+      // The workbook repeats the salad unchanged and says nothing about dessert.
+      const { id } = await uploadAndValidate([
+        menuRow('2027-03-01', 'Test Main Alpha', 'Test Main Beta', { salad: 'Same Salad' }),
+      ]);
+      db.executedWrites.length = 0;
+      await commit(id);
+
+      expect(db.executedWrites.filter((sql) => /menu_days|menu_options|menu_components/i.test(sql))).toEqual([]);
+      expect((await components('2027-03-01')).map((c) => c.name).sort()).toEqual([
+        'Keep Dessert',
+        'Same Salad',
+      ]);
+    });
+  });
+
+  // ==========================================================================
   // PREVIEW
   // ==========================================================================
 
