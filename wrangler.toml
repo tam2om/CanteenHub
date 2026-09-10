@@ -1,15 +1,30 @@
-# CanteenHub Worker Configuration
-# Development configuration (local)
+# CanteenHub Worker configuration.
+#
+# NOTE ON ENVIRONMENTS: Wrangler does NOT inherit bindings or vars into named
+# environments. d1_databases, r2_buckets and vars are "non-inheritable" keys, so
+# every one of them must be repeated under [env.production]. Omitting the D1
+# binding there does not fall back to the top-level one - it leaves env.DB
+# undefined and every request fails at runtime.
+# https://developers.cloudflare.com/workers/wrangler/environments/
+
 name = "canteenhub-local"
 main = "src/worker/index.ts"
-compatibility_date = "2024-08-01"
+compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 
-# D1 Database binding (local)
+# The built SPA. `single-page-application` returns index.html for any path that
+# is not a file, so deep links such as /admin/menu load the app instead of the
+# Worker's JSON 404. API routes are matched by the Worker first.
+[assets]
+directory = "./dist"
+not_found_handling = "single-page-application"
+
+# D1 database binding (local).
 [[d1_databases]]
 binding = "DB"
 database_name = "canteenhub-local"
 database_id = "local-dev"
+migrations_dir = "migrations"
 
 # R2 bucket binding - archival of original uploaded import files.
 # D1 stores only metadata and the object key; the workbook binary lives here.
@@ -17,18 +32,48 @@ database_id = "local-dev"
 binding = "IMPORTS"
 bucket_name = "canteenhub-imports-local"
 
-# Environment variables (do NOT put secrets here)
+# Environment variables (do NOT put secrets here).
 [vars]
 ENVIRONMENT = "local"
 FRONTEND_URL = "http://localhost:5173"
 
-# Production overrides
+# Expired sessions and login attempts are the only rows that accumulate without
+# operational value. Nothing else is ever purged automatically - audit and
+# history are the record.
+[triggers]
+crons = ["17 3 * * *"]
+
+# ---------------------------------------------------------------------------
+# Production
+#
+# Every binding and var is repeated deliberately; see the note at the top.
+# database_id is a PLACEHOLDER - replace it with the id printed by
+# `wrangler d1 create canteenhub-prod`. It is an account-scoped identifier, not
+# a secret, but it is environment-specific and must not be guessed.
+# ---------------------------------------------------------------------------
 [env.production]
 name = "canteenhub-prod"
 
-[env.production.vars]
-ENVIRONMENT = "production"
+[env.production.assets]
+directory = "./dist"
+not_found_handling = "single-page-application"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "canteenhub-prod"
+database_id = "REPLACE_WITH_PRODUCTION_D1_DATABASE_ID"
+migrations_dir = "migrations"
 
 [[env.production.r2_buckets]]
 binding = "IMPORTS"
 bucket_name = "canteenhub-imports"
+
+[env.production.vars]
+ENVIRONMENT = "production"
+# The origin the browser loads the app from. When the Worker serves the SPA
+# itself this is the Worker's own hostname, and CORS is effectively unused
+# because every request is same-origin.
+FRONTEND_URL = "https://REPLACE_WITH_PRODUCTION_HOSTNAME"
+
+[env.production.triggers]
+crons = ["17 3 * * *"]

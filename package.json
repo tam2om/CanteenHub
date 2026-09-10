@@ -4,18 +4,19 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
+    "db:migrate": "wrangler d1 migrations apply canteenhub-local --local",
+    "db:migrate:prod": "wrangler d1 migrations apply canteenhub-prod --env production --remote",
+    "dev": "vite",
     "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "test": "vitest run",
     "test:ui": "vitest --ui",
     "test:watch": "vitest",
-    "worker:dev": "wrangler dev",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "worker:deploy": "wrangler deploy",
-    "db:migrate": "wrangler d1 migrations apply canteenhub-local --local",
-    "db:migrate:prod": "wrangler d1 migrations apply canteenhub-prod",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "worker:deploy:prod": "npm run build && wrangler deploy --env production",
+    "worker:dev": "wrangler dev"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.102.8",
