@@ -91,9 +91,13 @@ body {
 .header__logout:hover:not(:disabled) { color: var(--text); border-color: var(--muted); }
 .header__who { margin: 0.25rem 0 0; font-size: 0.8125rem; color: var(--muted); }
 
-.nav { display: flex; gap: 0.25rem; margin-top: 0.5rem; }
+/* The admin nav carries eight destinations. Without wrapping, eight flex-1
+   items on a phone give each label about 40px - "Employee import" is unreadable
+   and barely tappable. Wrapping keeps every link legible and full-size, and
+   still lays out as a single row once there is room. */
+.nav { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.5rem; }
 .nav__link {
-  flex: 1; text-align: center; text-decoration: none;
+  flex: 1 1 6rem; text-align: center; text-decoration: none;
   color: var(--muted); font-size: 0.9375rem; font-weight: 500;
   padding: 0.6rem 0.25rem; border-bottom: 2px solid transparent;
   min-height: var(--tap); display: flex; align-items: center; justify-content: center;
