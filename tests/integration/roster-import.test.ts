@@ -1083,7 +1083,11 @@ describe('Shift roster Excel import', () => {
   // ==========================================================================
 
   describe('registry', () => {
-    it('the menu importer remains unregistered', async () => {
+    it('a roster workbook is NOT accepted as a menu import', async () => {
+      // The menu importer is registered as of Phase 4 Slice 4, so this no
+      // longer reports not_implemented. What must still hold is that the two
+      // types are not interchangeable: a roster file offered as a menu is
+      // rejected on its contents rather than half-imported.
       const form = new FormData();
       form.set('import_type', 'menu');
       form.set('file', new File([buildRosterWorkbook([ROW_BASIC]) as unknown as BlobPart], 'menu.xlsx'));
@@ -1095,7 +1099,9 @@ describe('Shift roster Excel import', () => {
       const batch = (await readJson(res)).data as { id: number };
 
       const validated = await readJson(await validate(batch.id));
-      expect(validated.data.outcome).toBe('not_implemented');
+      expect(validated.data.outcome).toBe('failed');
+      expect(await countRows(db, 'SELECT COUNT(*) as n FROM menu_days')).toBe(0);
+      expect(await countRows(db, 'SELECT COUNT(*) as n FROM roster_entries')).toBe(0);
     });
 
     it('the employee importer still works alongside the roster importer', async () => {

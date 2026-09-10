@@ -230,3 +230,61 @@ export function rosterRow(
   }
   return cells;
 }
+
+/**
+ * Header row for the lunch menu sheet, in the real file's column order.
+ *
+ * "Option Meal 1" and "Option Meal 2" are accompaniments, NOT selectable
+ * options - see the importer's header comment.
+ */
+export const MENU_HEADERS = [
+  'Day',
+  'Date',
+  'Option 1',
+  'Option 2',
+  'Option Meal 1',
+  'Option Meal 2',
+  'Condiment',
+  'Beverage',
+  'Dessert / Fruits',
+];
+
+/**
+ * A synthetic lunch menu workbook. All dish names invented for tests.
+ *
+ * Each row is `[day, date, option1, option2, salad, side, condiment, beverage,
+ * dessert]`; a null cell is written as a genuinely empty cell.
+ */
+export function buildMenuWorkbook(
+  rows: Array<Array<string | null>>,
+  {
+    sheetName = 'Lunch',
+    headers = MENU_HEADERS,
+  }: { sheetName?: string; headers?: string[] } = {}
+): Uint8Array {
+  return buildWorkbook([{ name: sheetName, rows: [headers, ...rows] }]);
+}
+
+/** Build one menu row without writing every trailing component cell. */
+export function menuRow(
+  date: string,
+  option1: string,
+  option2: string,
+  {
+    day = '',
+    salad = null,
+    side = null,
+    condiment = null,
+    beverage = null,
+    dessert = null,
+  }: {
+    day?: string;
+    salad?: string | null;
+    side?: string | null;
+    condiment?: string | null;
+    beverage?: string | null;
+    dessert?: string | null;
+  } = {}
+): Array<string | null> {
+  return [day, date, option1, option2, salad, side, condiment, beverage, dessert];
+}
