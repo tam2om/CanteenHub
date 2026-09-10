@@ -5,6 +5,9 @@
 
 import { Hono, Context } from 'hono';
 import { cors } from 'hono/cors';
+import type { ScheduledController } from '@cloudflare/workers-types';
+import { deleteExpiredSessions } from './db/sessions.js';
+import { cleanupLoginAttempts } from './lib/rateLimit.js';
 import { secureHeaders } from 'hono/secure-headers';
 import type { Env, Variables } from './types/env.js';
 import { healthRoutes } from './routes/health.js';
@@ -101,4 +104,40 @@ app.onError((err, c) => {
   }, 500);
 });
 
-export default app;
+/**
+ * Scheduled maintenance.
+ *
+ * Two tables accumulate rows that stop being useful the moment they expire:
+ * `sessions` past their expiry, and `login_attempts` past the rate-limit
+ * window. Neither is a record of anything - an expired session is already
+ * refused on every read, and a stale attempt no longer counts toward a lockout
+ * - so both grow without bound and without purpose until something removes
+ * them. Nightly is often enough; the exact minute is offset so it does not
+ * collide with every other Worker scheduled on the hour.
+ *
+ * DELIBERATELY NOT PURGED: audit_log, lunch_selection_history, roster_entries,
+ * import_batches and import_batch_rows. Those ARE the record. Deleting them
+ * needs a stated retention policy and an operator's decision, not a cron job
+ * quietly making one.
+ */
+async function scheduled(_event: ScheduledController, env: Env): Promise<void> {
+  try {
+    const sessions = await deleteExpiredSessions(env.DB);
+    const attempts = await cleanupLoginAttempts(env.DB);
+    // Counts only - no identifiers, no tokens.
+    console.log(
+      JSON.stringify({ event: 'maintenance', expired_sessions: sessions, stale_login_attempts: attempts })
+    );
+  } catch (error) {
+    // A failed cleanup must never take the Worker down; the next run retries.
+    console.error('Scheduled maintenance failed:', error instanceof Error ? error.name : 'unknown');
+  }
+}
+
+/**
+ * The Hono app itself is the default export, with `scheduled` attached rather
+ * than wrapped in a fresh object literal: the app carries `fetch` for the
+ * runtime and `request` for tests, and replacing it with `{ fetch, scheduled }`
+ * would take `app.request` away from every integration test in the suite.
+ */
+export default Object.assign(app, { scheduled });
