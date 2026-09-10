@@ -138,7 +138,13 @@ admin row and use `PUT /api/admin/employees/:id/password` from the first.
 Run the checklist in [`SMOKE-TESTS.md`](./SMOKE-TESTS.md). At minimum confirm
 `GET /api/health` returns success and that a deep link such as
 `https://<host>/admin/menu` loads the application rather than a JSON 404 — the
-latter means `[assets]` is misconfigured.
+latter means the `[assets]` block is missing its `binding = "ASSETS"`.
+
+The Worker serves `index.html` for a client-side route itself; the platform's
+automatic SPA fallback never runs here, because the asset router hands every
+unmatched path to a Worker that answers all of them. Both `[assets]` and
+`[env.production.assets]` therefore need the named `ASSETS` binding, not only
+`not_found_handling`.
 
 ---
 
@@ -159,6 +165,20 @@ migration leaves the schema in place. See [`RECOVERY.md`](./RECOVERY.md).
 A nightly cron (`17 3 * * *`) deletes expired sessions and stale login attempts.
 Nothing else is ever purged automatically — audit, selection history, roster and
 import records are the record.
+
+To exercise it without waiting for 03:17, run the local dev server with
+`npx wrangler dev --local --test-scheduled` and request
+`http://127.0.0.1:8787/__scheduled?cron=17+3+*+*+*`. A `200 Ran scheduled event`
+means the handler ran; confirm the effect in the database rather than the
+response, which is the same either way:
+
+```bash
+npx wrangler d1 execute <database-name> --local \
+  --command "SELECT (SELECT COUNT(*) FROM sessions) s, (SELECT COUNT(*) FROM login_attempts) l"
+```
+
+In production the schedule is visible under the Worker's **Settings → Triggers**,
+and each run logs `{"event":"maintenance",...}` with counts only.
 
 ---
 

@@ -2,7 +2,7 @@
  * Cloudflare Worker Environment Types
  */
 
-import type { D1Database, R2Bucket } from '@cloudflare/workers-types';
+import type { D1Database, Fetcher, R2Bucket } from '@cloudflare/workers-types';
 import type { EmployeeWithRole, SessionData } from '../../shared/types/index.js';
 
 export interface Env {
@@ -13,6 +13,11 @@ export interface Env {
   // so a deployment without the binding fails with a clear, handled error
   // rather than a runtime crash deep inside a request.
   IMPORTS?: R2Bucket;
+
+  // The built SPA, so the Worker can serve index.html for a client-side route.
+  // Optional in the type: a deployment without it still serves the API, and the
+  // notFound handler degrades to a plain JSON 404 rather than crashing.
+  ASSETS?: Fetcher;
   
   // Environment Variables
   ENVIRONMENT: 'local' | 'production';

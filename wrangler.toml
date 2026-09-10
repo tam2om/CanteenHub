@@ -18,6 +18,10 @@ compatibility_flags = ["nodejs_compat"]
 [assets]
 directory = "./dist"
 not_found_handling = "single-page-application"
+# Named so the Worker can serve index.html itself. The platform's automatic
+# SPA fallback does not reach a path the Worker script answers first, and this
+# Worker answers everything - see the notFound handler in src/worker/index.ts.
+binding = "ASSETS"
 
 # D1 database binding (local).
 [[d1_databases]]
@@ -57,6 +61,7 @@ name = "canteenhub-prod"
 [env.production.assets]
 directory = "./dist"
 not_found_handling = "single-page-application"
+binding = "ASSETS"
 
 [[env.production.d1_databases]]
 binding = "DB"

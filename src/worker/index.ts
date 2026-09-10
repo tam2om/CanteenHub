@@ -90,9 +90,41 @@ app.route('/api/admin/imports', importRoutes);
 // The router applies requireAuth + requireRole to every endpoint it owns.
 app.route('/api/admin', adminRoutes);
 
-// 404 handler
-app.notFound((c) => {
-  return c.json({ success: false, error: 'Not Found' }, 404);
+/**
+ * 404 handler, and the single-page-application fallback.
+ *
+ * A client-side route such as /admin/menu matches no file, so the asset router
+ * passes it to this Worker - and a Worker that answers everything never lets
+ * the platform's automatic SPA fallback run. Verified against a real
+ * `wrangler dev`: without this, reloading or bookmarking any route below the
+ * root answered {"error":"Not Found"} as JSON.
+ *
+ * /api/* keeps its JSON 404: an unknown endpoint is a client error, and
+ * answering it with a page would turn a typo into a confusing HTML body.
+ */
+app.notFound(async (c) => {
+  const url = new URL(c.req.url);
+
+  if (url.pathname.startsWith('/api/') || !c.env.ASSETS) {
+    return c.json({ success: false, error: 'Not Found' }, 404);
+  }
+
+  // Ask the asset router for the app shell itself; the client router then
+  // resolves the path. A 200 is deliberate - this IS the page for that route,
+  // not an error page.
+  // A bare GET for the shell: the original request's method and body are
+  // irrelevant to fetching index.html, and passing them through only invites
+  // a type mismatch between Hono's Request and the Workers one.
+  const shell = await c.env.ASSETS.fetch(new URL('/', url).toString());
+  if (!shell.ok) {
+    return c.json({ success: false, error: 'Not Found' }, 404);
+  }
+
+  // Read the shell to a string rather than piping the stream: index.html is a
+  // few kilobytes, and the Workers ReadableStream and the global one are
+  // different types that will not compose without a cast.
+  const html = await shell.text();
+  return c.html(html, 200);
 });
 
 // Error handler

@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import type { Env } from '../../src/worker/types/env.js';
 import app from '../../src/worker/index.js';
 import { createTestDb, type TestD1Database } from '../helpers/d1.js';
 import { createTestR2 } from '../helpers/r2.js';
@@ -61,6 +62,16 @@ describe('Wrangler configuration', () => {
     expect(wrangler).toMatch(/directory\s*=\s*"\.\/dist"/);
     expect(wrangler).toMatch(/not_found_handling\s*=\s*"single-page-application"/);
     expect(prod).toContain('[env.production.assets]');
+  });
+
+  it('names the assets binding in BOTH environments', () => {
+    // The Worker serves the shell itself (see the SPA fallback tests below),
+    // which it can only do through a named binding. An unnamed [assets] block
+    // deploys fine and then 404s every deep link.
+    const localAssets = wrangler.slice(wrangler.indexOf('[assets]'), wrangler.indexOf('[[d1_databases]]'));
+    expect(localAssets).toMatch(/binding\s*=\s*"ASSETS"/);
+    const prodAssets = prod.slice(prod.indexOf('[env.production.assets]'));
+    expect(prodAssets).toMatch(/binding\s*=\s*"ASSETS"/);
   });
 
   it('contains NO real credentials - only marked placeholders', () => {
@@ -254,5 +265,78 @@ describe('Session cookie hardening', () => {
       // than passing vacuously.
       throw new Error(`Login fixture did not authenticate: ${res.status}`);
     }
+  });
+});
+
+/**
+ * Single-page-application fallback.
+ *
+ * Found by a real `wrangler dev` run, not by review: `[assets]` with
+ * not_found_handling = "single-page-application" did NOT serve index.html for
+ * /admin/menu, because the asset router hands unmatched paths to the Worker
+ * and the Worker's own notFound answered first with JSON. These tests pin the
+ * fix so the deep link cannot silently regress to a JSON 404 again.
+ */
+describe('SPA fallback', () => {
+  let db: TestD1Database;
+  const SHELL = '<!doctype html><html><head><title>CanteenHub</title></head><body><div id="root"></div></body></html>';
+
+  /** A stand-in for the Workers assets binding: only the shell exists. */
+  function assetsStub(): { fetch: (input: string) => Promise<Response> } {
+    return {
+      fetch: async (input: string) => {
+        const pathname = new URL(input).pathname;
+        return pathname === '/'
+          ? new Response(SHELL, { status: 200, headers: { 'Content-Type': 'text/html' } })
+          : new Response('Not Found', { status: 404 });
+      },
+    };
+  }
+
+  function envWithAssets(): Env {
+    return { ...testEnv(db), ASSETS: assetsStub() } as unknown as Env;
+  }
+
+  beforeEach(async () => {
+    db = await createTestDb();
+  });
+
+  it.each(['/admin/menu', '/admin/roster', '/admin/reports', '/history', '/profile', '/login'])(
+    'serves the app shell for the client-side route %s',
+    async (route) => {
+      const res = await app.request(`${BASE}${route}`, {}, envWithAssets());
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Content-Type')).toContain('text/html');
+      await expect(res.text()).resolves.toContain('<div id="root">');
+    }
+  );
+
+  it('keeps a JSON 404 for an unknown API endpoint', async () => {
+    // A mistyped endpoint is a client error. Answering it with a page would
+    // hand a fetch() caller HTML where it expects an error envelope.
+    const res = await app.request(`${BASE}/api/definitely-not-an-endpoint`, {}, envWithAssets());
+
+    expect(res.status).toBe(404);
+    expect(res.headers.get('Content-Type')).toContain('application/json');
+    const body = await readJson<{ success: boolean; error: string }>(res);
+    expect(body.success).toBe(false);
+  });
+
+  it('degrades to a JSON 404 when no assets binding is deployed', async () => {
+    // An API-only deployment must not crash on an unknown path.
+    const res = await app.request(`${BASE}/admin/menu`, {}, testEnv(db));
+
+    expect(res.status).toBe(404);
+    expect(res.headers.get('Content-Type')).toContain('application/json');
+  });
+
+  it('returns a JSON 404 rather than an error page when the shell is missing', async () => {
+    const brokenAssets = { fetch: async () => new Response('gone', { status: 500 }) };
+    const env = { ...testEnv(db), ASSETS: brokenAssets } as unknown as Env;
+
+    const res = await app.request(`${BASE}/admin/menu`, {}, env);
+
+    expect(res.status).toBe(404);
   });
 });

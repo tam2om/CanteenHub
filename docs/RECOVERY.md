@@ -30,6 +30,32 @@ npx wrangler d1 export canteenhub-prod --env production --remote --output ./back
 Store it outside the account it came from. This is the only backup that survives
 the account itself.
 
+**Restoring from that export** — into a freshly created, empty database:
+
+```bash
+npx wrangler d1 execute <database-name> --env production --remote --file ./backup-YYYY-MM-DD.sql
+```
+
+The export carries the `d1_migrations` ledger with it, so after the restore
+`wrangler d1 migrations list` reports nothing to apply. Do **not** run
+`migrations apply` first: the export contains the same `CREATE TABLE`
+statements and they will collide.
+
+### Rehearsal status
+
+Rehearsed end to end on a throwaway database (destroy the store, restore from
+the export, confirm the application serves the restored data):
+
+| Procedure | Rehearsed? |
+|---|---|
+| Manual export → total loss → restore → application reads the restored data | ✅ |
+| §4.1 releasing a stuck batch, including the compare-and-swap no-op on re-run | ✅ |
+| §4.2 marking an applied-but-uncommitted batch committed, and the API's refusal to double-commit | ✅ |
+| §2 Time Travel `info` / `restore` | ❌ — needs a real Cloudflare account; never rehearsed |
+
+Time Travel therefore remains an **unverified** mechanism in this repository.
+Rehearse it on a throwaway database before relying on it.
+
 ---
 
 ## 2. Restoring D1
