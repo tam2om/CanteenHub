@@ -6,7 +6,7 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types/env.js';
 import { requireAuth, requireRole } from '../middleware/session.js';
-import { getPublishedMenuByDate, getFullMenuByDate, getUpcomingPublishedMenus, getMenuDayById, upsertMenuDay, upsertMenuOption, addMenuComponent, updateMenuComponent, publishMenuDay, archiveMenuDay, deleteMenuDay } from '../repositories/menu.repo.js';
+import { getPublishedMenuByDate, getFullMenuByDate, getUpcomingPublishedMenus, getMenuDaysInRange, getMenuDayById, menuPublishBlocker, upsertMenuDay, upsertMenuOption, addMenuComponent, updateMenuComponent, publishMenuDay, archiveMenuDay, deleteMenuDay } from '../repositories/menu.repo.js';
 import { logMenuChange, logMenuOptionChange, logMenuComponentChange } from '../services/audit.service.js';
 import { getCurrentBusinessDate } from '../services/settings.service.js';
 import { isValidBusinessDate } from '../lib/datetime.js';
@@ -36,6 +36,49 @@ app.get('/upcoming', async (c) => {
   const menus = await getUpcomingPublishedMenus(db, fromDate, safeLimit);
 
   return c.json({ success: true, data: menus });
+});
+
+/**
+ * Days in a YYYY-MM month, by pure calendar arithmetic.
+ *
+ * Date.UTC is used as a calendar probe, never as a clock: day 0 of the next
+ * month is the last day of this one. No timezone is involved because no
+ * "now" is involved.
+ */
+function daysInMonth(month: string): number {
+  const [year, monthNumber] = month.split('-').map(Number);
+  return new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+}
+
+/**
+ * GET /api/menu/admin/range?from=&to= - every menu day in a range (Admin only)
+ *
+ * The administrative counterpart to /upcoming: that one is employee-facing and
+ * shows published days only, which is exactly the wrong thing for a screen
+ * whose job is reviewing drafts before they go live.
+ *
+ * Registered before /:date deliberately - a single-segment param route would
+ * otherwise be tried first for anything shaped like a date.
+ */
+app.get('/admin/range', requireAuth, requireRole(['admin', 'super_admin']), async (c) => {
+  const db = c.env.DB;
+  const monthParam = c.req.query('month');
+
+  // The server owns every date semantic here, including "which month is it
+  // now". The browser never decides that: a client clock in another timezone
+  // would silently open the wrong month.
+  const today = await getCurrentBusinessDate(db);
+  const month = monthParam ?? today.slice(0, 7);
+
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    return c.json({ success: false, error: 'Invalid month. Use YYYY-MM' }, 400);
+  }
+
+  const from = `${month}-01`;
+  const to = `${month}-${String(daysInMonth(month)).padStart(2, '0')}`;
+
+  const menus = await getMenuDaysInRange(db, from, to);
+  return c.json({ success: true, data: { menus, month, from, to, today } });
 });
 
 /**
@@ -76,14 +119,30 @@ app.post('/', requireAuth, requireRole(['admin', 'super_admin']), async (c) => {
   const ipAddress = c.req.header('X-Forwarded-For') || null;
   
   const body = await c.req.json();
-  const { meal_date, status = 'draft' } = body;
+  const { meal_date } = body;
   
-  if (!meal_date || !/^\d{4}-\d{2}-\d{2}$/.test(meal_date)) {
+  // A calendar date, not merely a well-shaped string: 2027-02-30 is refused.
+  if (!isValidBusinessDate(meal_date)) {
     return c.json({ success: false, error: 'Invalid or missing meal_date' }, 400);
+  }
+
+  // `status` is deliberately NOT read from the request. A menu day is created
+  // as a draft and reaches `published` only through the publish endpoint, which
+  // checks the menu is complete and audits the transition as a PUBLISH. Letting
+  // a create call set status would both bypass that check and, on an existing
+  // day, silently unpublish a live menu.
+  if (body.status !== undefined) {
+    return c.json(
+      {
+        success: false,
+        error: 'status cannot be set here. Use PUT /api/menu/:id/publish or /archive.',
+      },
+      400
+    );
   }
   
   try {
-    const result = await upsertMenuDay(db, meal_date, status);
+    const result = await upsertMenuDay(db, meal_date);
     
     await logMenuChange(
       db,
@@ -217,6 +276,22 @@ app.put('/:id/publish', requireAuth, requireRole(['admin', 'super_admin']), asyn
   const menuDayId = parseInt(c.req.param('id')!, 10);
   const session = c.get('session');
   const ipAddress = c.req.header('X-Forwarded-For') || null;
+
+  if (Number.isNaN(menuDayId)) {
+    return c.json({ success: false, error: 'Invalid menu id' }, 400);
+  }
+
+  const existing = await getMenuDayById(db, menuDayId);
+  if (!existing) {
+    return c.json({ success: false, error: 'Menu day not found' }, 404);
+  }
+
+  // Completeness is checked HERE rather than in the UI: the API must refuse a
+  // half-built menu even when called directly.
+  const blocker = await menuPublishBlocker(db, menuDayId);
+  if (blocker) {
+    return c.json({ success: false, error: blocker }, 400);
+  }
   
   try {
     const result = await publishMenuDay(db, menuDayId);
@@ -247,6 +322,15 @@ app.put('/:id/archive', requireAuth, requireRole(['admin', 'super_admin']), asyn
   const menuDayId = parseInt(c.req.param('id')!, 10);
   const session = c.get('session');
   const ipAddress = c.req.header('X-Forwarded-For') || null;
+
+  if (Number.isNaN(menuDayId)) {
+    return c.json({ success: false, error: 'Invalid menu id' }, 400);
+  }
+
+  const existing = await getMenuDayById(db, menuDayId);
+  if (!existing) {
+    return c.json({ success: false, error: 'Menu day not found' }, 404);
+  }
   
   try {
     const result = await archiveMenuDay(db, menuDayId);

@@ -248,3 +248,56 @@ export interface ImportList {
   limit: number;
   offset: number;
 }
+
+// ---------------------------------------------------------------------------
+// Admin menu management
+// ---------------------------------------------------------------------------
+
+/** The component types the database CHECK constraint actually allows. */
+export const COMPONENT_TYPES = [
+  'salad',
+  'soup',
+  'bread',
+  'condiment',
+  'beverage',
+  'dessert',
+  'other',
+] as const;
+
+export type ComponentType = (typeof COMPONENT_TYPES)[number];
+
+export type MenuStatus = 'draft' | 'published' | 'archived';
+
+export interface AdminMenuOption {
+  id: number;
+  menu_day_id: number;
+  option_number: 1 | 2;
+  name: string;
+  description: string | null;
+}
+
+export interface AdminMenuComponent {
+  id: number;
+  menu_day_id: number;
+  component_type: ComponentType;
+  name: string;
+  sort_order: number;
+}
+
+/** A menu day as the admin range endpoint returns it - drafts included. */
+export interface AdminMenuDay {
+  id: number;
+  meal_date: string;
+  status: MenuStatus;
+  options: AdminMenuOption[];
+  components: AdminMenuComponent[];
+}
+
+export interface AdminMenuMonth {
+  menus: AdminMenuDay[];
+  month: string;
+  from: string;
+  to: string;
+  /** The server's business date. The browser never derives this itself. */
+  today: string;
+}
