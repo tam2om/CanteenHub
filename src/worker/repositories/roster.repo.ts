@@ -15,6 +15,14 @@ export interface RosterMutationResult {
   entry: RosterEntry;
   beforeJson: string | null;
   afterJson: string | null;
+  /**
+   * False when the entry already held this value, so nothing was written.
+   *
+   * Mirrors the convention selections.repo.ts established: an audit trail full
+   * of "changed day to day" entries hides the changes that matter, so the
+   * caller skips the audit record when nothing actually changed.
+   */
+  changed: boolean;
 }
 
 export interface RosterDeleteResult {
@@ -87,6 +95,101 @@ export async function getPublishedMenuDates(
 }
 
 /**
+ * Escape the characters LIKE treats as wildcards, for use with ESCAPE '\\'.
+ *
+ * The backslash goes first: escaping it after % and _ would double-escape the
+ * markers just added.
+ */
+function escapeLikeTerm(term: string): string {
+  return term.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+}
+
+/** One employee's roster standing for a date. `shift_value` null = no entry. */
+export interface RosterDayRow {
+  employee_id: number;
+  amco_id: string;
+  full_name: string;
+  department: string | null;
+  section: string | null;
+  roster_type: string;
+  is_active: number;
+  /** The roster entry's own id, or null when there is no entry. */
+  roster_entry_id: number | null;
+  /** 'day' | 'night' | 'off', or NULL meaning the roster is genuinely missing. */
+  shift_value: string | null;
+  source: string | null;
+}
+
+export interface RosterDayFilters {
+  /** Matched against name and AMCO ID, case-insensitively. */
+  search?: string;
+  rosterType?: string;
+}
+
+/**
+ * Every employee's roster standing for one date, in ONE query.
+ *
+ * A LEFT JOIN, deliberately: getRosterEntriesByDate joins the other way and so
+ * can only show employees who already HAVE an entry. The employees who do not
+ * are exactly the ones an administrator opens this screen to find - they are
+ * the ROSTER_MISSING cases - and an inner join renders them invisible.
+ *
+ * `shift_value` is NULL for them rather than 'off'. The distinction matters:
+ * 'off' is a roster decision someone made, missing is the absence of one, and
+ * the eligibility engine reports them as different reasons.
+ */
+export async function getRosterForDate(
+  db: D1Database,
+  workDate: string,
+  filters: RosterDayFilters = {}
+): Promise<RosterDayRow[]> {
+  const where: string[] = [];
+  const binds: Array<string | number> = [workDate];
+
+  if (filters.search) {
+    // Bound as a parameter, so the term can never alter the SQL. It is also
+    // escaped: LIKE treats % and _ as wildcards, so an administrator searching
+    // for "50%" would otherwise match everybody rather than nobody.
+    where.push(
+      "(LOWER(e.full_name) LIKE ? ESCAPE '\\' OR LOWER(e.amco_id) LIKE ? ESCAPE '\\')"
+    );
+    const term = `%${escapeLikeTerm(filters.search.toLowerCase())}%`;
+    binds.push(term, term);
+  }
+
+  if (filters.rosterType) {
+    where.push('e.roster_type = ?');
+    binds.push(filters.rosterType);
+  }
+
+  const result = await db
+    .prepare(
+      `SELECT
+         e.id            AS employee_id,
+         e.amco_id       AS amco_id,
+         e.full_name     AS full_name,
+         e.department    AS department,
+         e.section       AS section,
+         e.roster_type   AS roster_type,
+         e.is_active     AS is_active,
+         r.id            AS roster_entry_id,
+         r.shift_value   AS shift_value,
+         r.source        AS source
+       FROM employees e
+       LEFT JOIN roster_entries r
+         ON r.employee_id = e.id
+        AND r.work_date = ?
+        AND r.deleted_at IS NULL
+       ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
+       ORDER BY e.full_name, e.amco_id`
+    )
+    .bind(...binds)
+    .all<RosterDayRow>();
+
+  return result.results || [];
+}
+
+/**
  * Create or update roster entry (returns the created/updated entry with audit info)
  */
 export async function upsertRosterEntry(
@@ -103,6 +206,18 @@ export async function upsertRosterEntry(
     .first<RosterEntry>();
   
   const beforeJson = existing ? JSON.stringify(existing) : null;
+
+  // Re-setting the value an entry already holds writes nothing. The AFTER
+  // UPDATE trigger would otherwise rewrite updated_at, and the route would
+  // record an audit entry describing a change that did not happen.
+  if (existing && existing.shift_value === shiftValue && existing.source === source) {
+    return {
+      entry: existing,
+      beforeJson,
+      afterJson: beforeJson,
+      changed: false,
+    };
+  }
   
   await db
     .prepare(`
@@ -126,7 +241,8 @@ export async function upsertRosterEntry(
   return {
     entry: result,
     beforeJson,
-    afterJson: JSON.stringify(result)
+    afterJson: JSON.stringify(result),
+    changed: true,
   };
 }
 

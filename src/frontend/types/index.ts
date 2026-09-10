@@ -328,3 +328,29 @@ export interface LunchReport {
   eligibility: { by_reason: ReportReasonCount[] };
   not_eligible: { by_reason: ReportReasonCount[] };
 }
+
+// ---------------------------------------------------------------------------
+// Admin roster management
+// ---------------------------------------------------------------------------
+
+export type ShiftValue = 'day' | 'night' | 'off';
+
+/** One employee's roster standing for a date. `shift_value` null = no entry. */
+export interface RosterDayRow {
+  employee_id: number;
+  amco_id: string;
+  full_name: string;
+  department: string | null;
+  section: string | null;
+  roster_type: string;
+  is_active: number;
+  roster_entry_id: number | null;
+  /** null means the roster is genuinely MISSING - not "off". */
+  shift_value: ShiftValue | null;
+  source: string | null;
+}
+
+export interface RosterDay {
+  date: string;
+  employees: RosterDayRow[];
+}
