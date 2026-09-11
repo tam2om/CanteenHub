@@ -45,3 +45,7 @@ coverage/
 .yarn/
 pnp-*
 ```
+
+# Local Wrangler state: the miniflare D1 database and R2 blobs written by
+# `wrangler dev`. Real data, never a build artifact - it must not be committed.
+.wrangler/
