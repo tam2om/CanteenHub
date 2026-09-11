@@ -60,11 +60,32 @@ app.use('*', cors({
 // Health check endpoint (no auth required)
 app.route('/api/health', healthRoutes);
 
-// Authentication endpoints (no auth required)
-app.route('/api/auth', authRoutes);
-
-// Protected routes - all other API endpoints require authentication
+// Session lookup runs BEFORE any router is mounted, because Hono matches in
+// registration order: an `app.use()` added after `app.route()` never runs for
+// the routes that mount already claimed. Registered after `/api/auth`, this
+// middleware silently skipped that router, so `c.get('employee')` was forever
+// undefined there and BOTH of its authenticated endpoints answered 401 to a
+// perfectly valid session cookie:
+//
+//   GET /api/auth/me              - the SPA restores its session from this on
+//                                   every page load, so a reload, a bookmark
+//                                   or a typed URL logged the user straight
+//                                   back out.
+//   PUT /api/auth/change-password - no employee could ever change their own
+//                                   password.
+//
+// Found by driving a real browser against a real Worker; the frontend tests
+// stub `fetch`, so they asserted what the UI does with a 200 and never that
+// the server sends one.
+//
+// This middleware only POPULATES the context - it never rejects - so running
+// it across all of /api/* leaves /api/auth/login and /api/auth/logout working
+// exactly as before, whether or not a cookie is present.
 app.use('/api/*', sessionMiddleware);
+
+// Authentication endpoints. Login and logout need no session; `me` and
+// `change-password` read the one the middleware above just loaded.
+app.route('/api/auth', authRoutes);
 
 // Employee routes
 app.route('/api/employees', employeeRoutes);
