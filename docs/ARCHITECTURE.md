@@ -1024,7 +1024,14 @@ Cloudflare's WebCrypto implementation **refuses PBKDF2 above 100,000 iterations*
 
 - The app is internal, has no public value, and holds no financial or personal data beyond names, departments, and meal choices.
 - The realistic attack is online guessing, not offline cracking — and online guessing is what the compensating controls address:
-  - **Account lockout:** 5 failed attempts → 15-minute lock, recorded on the employee row and audited.
+  - **Account lockout:** 5 failed attempts → 15-minute lock. *As built* (corrected
+    in the Phase 8 audit — this paragraph previously said the lock was "recorded
+    on the employee row and audited", and neither is true): the state lives in
+    the `login_attempts` table keyed on `<client IP>:<AMCO ID>`, the `employees`
+    table carries no lockout column, and a lockout writes no `audit_log` entry.
+    The composite key is deliberate — it stops one attacker locking a colleague
+    out from a different address, and stops one targeted account locking out the
+    office. To release a lock early, see `RECOVERY.md` §4.3.
   - **Rate limiting** at the Cloudflare WAF layer on `/api/auth/login`, per IP and per AMCO ID.
   - **Generic failure message** ("Invalid AMCO ID or password") so the endpoint is not an employee-ID oracle.
   - **Admin-issued initial passwords are high-entropy and random**, not `Welcome123` — this removes the largest real risk, which is guessable defaults rather than hash strength.

@@ -173,6 +173,32 @@ classifies every row UNCHANGED and writes nothing.
 commit, or a reconciliation daemon. The window is small, the failure is
 detectable by a single query, and the recovery is two commands.
 
+### 4.3 Releasing a login lockout early
+
+Five failed attempts lock an account for fifteen minutes. It expires on its own,
+so this is only for the "the site manager is locked out and needs in now" call.
+
+The key is `<client IP>:<AMCO ID>`, **not** the AMCO ID alone — a `WHERE
+identifier = '<AMCO_ID>'` deletes nothing and looks like the command failed:
+
+```bash
+# See what is actually locked, and from where.
+npx wrangler d1 execute canteenhub-prod --env production --remote \
+  --command "SELECT identifier, COUNT(*) n, MAX(attempt_time) last
+             FROM login_attempts WHERE success = 0
+               AND attempt_time > datetime('now','-15 minutes')
+             GROUP BY identifier;"
+
+# Release one account, from every address.
+npx wrangler d1 execute canteenhub-prod --env production --remote \
+  --command "DELETE FROM login_attempts
+             WHERE identifier LIKE '%:<AMCO_ID>' AND success = 0;"
+```
+
+Delete only `success = 0` rows: the successful ones are the record of who got
+in and when. A lockout writes no `audit_log` entry, so `login_attempts` is the
+only place it is visible — which is the reason to look before deleting.
+
 ---
 
 ## 5. What cannot be recovered

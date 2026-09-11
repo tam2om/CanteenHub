@@ -92,7 +92,7 @@ base `flex: 1` still shrinks there. Fixed with `width: auto` in the same rule.
 | Live smoke test on Cloudflare | **BLOCKED** | Depends on the above |
 | D1 Time Travel rehearsal | **BLOCKED** | Needs a real account; `RECOVERY.md` still marks it unverified |
 | Local deployment & runtime validation | **PASS** | `wrangler deploy --env production --dry-run` clean; migrations applied; all routes served |
-| Real source-file validation | **PARTIAL** | No workbook was available in this environment; see §5 |
+| Real source-file validation | **PARTIAL** (employees/roster now PASS — see Phase 8) | No workbook was available *to Phase 7*; see §5 |
 | Import data integrity | **PASS** | Every documented classification and error case, §6 |
 | End-to-end business scenarios | **PASS** | 14/14, §7 |
 | Data consistency | **PASS** | 21 checks, all zero, §8 |
@@ -105,6 +105,13 @@ base `flex: 1` still shrinks there. Fixed with `width: auto` in the same rule.
 ---
 
 ## 5. Real source files — PARTIAL, and why
+
+> **Superseded in part by Phase 8.** The real employee/roster workbook *was*
+> available to the Phase 8 audit and has now been run through both importers
+> end to end — see `PHASE8-RELEASE-AUDIT.md` §3. The section below records
+> Phase 7's position accurately and is left as written; what remains true of it
+> is the menu: the September lunch menu is still PDF-only, so the menu importer
+> is still not real-source validated.
 
 No workbook of any kind exists in this environment: `find` over the repository
 and home directory returns no `.xlsx`, `.xls` or `.pdf`. The employee and roster
