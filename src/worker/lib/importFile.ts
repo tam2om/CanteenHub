@@ -1,11 +1,14 @@
 /**
- * Upload validation and R2 object-key derivation for imports.
+ * Upload validation for imports.
  *
  * Uploaded workbooks are untrusted input. Nothing here parses spreadsheet
  * content - it establishes only that the bytes are plausibly the file type the
- * future parsers will consume, and that they are small enough to handle. No
- * macro is executed, no formula is evaluated, and the workbook is never treated
- * as code.
+ * parsers will consume, and that they are small enough to handle. No macro is
+ * executed, no formula is evaluated, and the workbook is never treated as code.
+ *
+ * The checks below are the only gate the bytes pass through, because there is
+ * nowhere for them to be stored and inspected later: a workbook is parsed in
+ * the request that uploads it and then dropped.
  */
 
 export const IMPORT_TYPES = ['employees', 'roster', 'menu'] as const;
@@ -13,7 +16,8 @@ export type ImportType = (typeof IMPORT_TYPES)[number];
 
 /**
  * 10 MB. A realistic employee/roster/menu workbook is well under 1 MB; this is
- * a generous ceiling that still bounds what a single request can push into R2.
+ * a generous ceiling that still bounds what one request can hold in memory,
+ * since the upload is read, inflated and parsed inside that single invocation.
  */
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
