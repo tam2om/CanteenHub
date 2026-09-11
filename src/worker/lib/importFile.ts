@@ -106,16 +106,3 @@ export async function hashFileContents(bytes: Uint8Array): Promise<string> {
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
 }
-
-/**
- * Deterministic R2 object key for a batch.
- *
- * Derived from the import type and the batch id ONLY. The uploaded filename
- * never reaches the key, so a name like `../../etc/passwd` or one containing a
- * slash cannot steer where the object is written. Being deterministic also
- * means an interrupted upload can be located and reconciled from the batch row
- * alone, rather than being an orphan nobody can find.
- */
-export function importObjectKey(importType: ImportType, batchId: number): string {
-  return `imports/${importType}/${batchId}/source.xlsx`;
-}

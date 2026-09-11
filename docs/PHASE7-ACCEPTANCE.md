@@ -29,7 +29,8 @@ Nothing in this document should be read as evidence for either.
 ## 2. What was run instead
 
 A real Worker under `wrangler dev` — `workerd`, real D1 through wrangler's own
-migration machinery, real R2 blobs on disk — plus a real Chromium driven against
+migration machinery, real R2 blobs on disk (R2 was removed from the
+architecture after Phase 8 — see `ARCHITECTURE.md` §0.0) — plus a real Chromium driven against
 it over HTTPS (`--local-protocol https`, so the `Secure` cookie behaves as it
 will in production). This is genuine runtime validation. It is **not** a
 substitute for Cloudflare's edge: it does not exercise the real asset router,

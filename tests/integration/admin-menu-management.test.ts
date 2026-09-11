@@ -9,7 +9,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import app from '../../src/worker/index.js';
 import { createTestDb, type TestD1Database } from '../helpers/d1.js';
-import { createTestR2 } from '../helpers/r2.js';
 import { buildMenuWorkbook, menuRow } from '../helpers/xlsxFixture.js';
 import {
   testEnv,
@@ -35,7 +34,7 @@ describe('Admin menu management', () => {
 
   beforeEach(async () => {
     db = createTestDb();
-    env = testEnv(db, createTestR2());
+    env = testEnv(db);
     admin = await seedEmployee(db, { amcoId: 'TEST900', roleId: ROLE_ADMIN });
     superAdmin = await seedEmployee(db, { amcoId: 'TEST901', roleId: ROLE_SUPER_ADMIN });
     employee = await seedEmployee(db, { amcoId: 'TEST100', rosterType: 'regular' });

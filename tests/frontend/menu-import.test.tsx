@@ -39,7 +39,6 @@ function batch(overrides: Record<string, unknown> = {}) {
     original_filename: 'synthetic-menu.xlsx',
     file_size_bytes: 3072,
     content_sha256: 'c'.repeat(64),
-    file_archived: true,
     uploaded_by: ADMIN_USER.id,
     uploaded_by_name: ADMIN_USER.full_name,
     uploaded_by_amco_id: ADMIN_USER.amco_id,

@@ -35,14 +35,13 @@ npx wrangler d1 create canteenhub-prod
 This prints a `database_id`. It is an account-scoped identifier, not a secret,
 but it **is** environment-specific.
 
-### R2
+### Object storage — none required
 
-R2 holds the original uploaded import workbooks. D1 stores only metadata and the
-object key.
-
-```bash
-npx wrangler r2 bucket create canteenhub-imports
-```
+CanteenHub uses **no object store**. An uploaded workbook is parsed in the
+request that carries it and is never persisted: `import_batches` keeps the
+filename, size and SHA-256, and `import_batch_rows` keeps everything the commit
+replays. There is no bucket to create and no R2 subscription to enable, which is
+what keeps the whole system inside Cloudflare's free tier.
 
 ---
 
@@ -56,7 +55,7 @@ Replace the two production placeholders:
 | `https://REPLACE_WITH_PRODUCTION_HOSTNAME` | the origin the browser loads the app from |
 
 > **Wrangler does not inherit bindings into named environments.**
-> `d1_databases`, `r2_buckets` and `vars` are non-inheritable: each is repeated
+> `d1_databases` and `vars` are non-inheritable: each is repeated
 > under `[env.production]` deliberately. Deleting one of those repeats does not
 > fall back to the top-level value — it leaves the binding **undefined at
 > runtime**, and every request fails.
@@ -185,7 +184,6 @@ and each run logs `{"event":"maintenance",...}` with counts only.
 ## 11. What the operator must configure manually
 
 - [ ] D1 database created, `database_id` written into `wrangler.toml`
-- [ ] R2 bucket created and named in `wrangler.toml`
 - [ ] `FRONTEND_URL` set to the real production origin
 - [ ] Migrations applied to the production database
 - [ ] First administrator seeded and given a password

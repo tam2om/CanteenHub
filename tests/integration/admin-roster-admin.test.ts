@@ -11,7 +11,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import app from '../../src/worker/index.js';
 import { createTestDb, type TestD1Database } from '../helpers/d1.js';
-import { createTestR2 } from '../helpers/r2.js';
 import { getEligibilityWithNextDate } from '../../src/worker/services/eligibility.service.js';
 import type { Employee } from '../../src/shared/types/index.js';
 import type { BusinessDate } from '../../src/worker/lib/datetime.js';
@@ -44,7 +43,7 @@ describe('Manual roster administration', () => {
 
   beforeEach(async () => {
     db = createTestDb();
-    env = testEnv(db, createTestR2());
+    env = testEnv(db);
     admin = await seedEmployee(db, { amcoId: 'TEST900', roleId: ROLE_ADMIN, rosterType: 'amman_hq' });
     superAdmin = await seedEmployee(db, { amcoId: 'TEST901', roleId: ROLE_SUPER_ADMIN, rosterType: 'amman_hq' });
     shiftWorker = await seedEmployee(db, { amcoId: 'TEST100', fullName: 'Alpha Shift', rosterType: 'shift' });

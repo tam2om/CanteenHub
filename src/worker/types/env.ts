@@ -2,17 +2,16 @@
  * Cloudflare Worker Environment Types
  */
 
-import type { D1Database, Fetcher, R2Bucket } from '@cloudflare/workers-types';
+import type { D1Database, Fetcher } from '@cloudflare/workers-types';
 import type { EmployeeWithRole, SessionData } from '../../shared/types/index.js';
 
 export interface Env {
-  // Cloudflare Bindings
+  // Cloudflare Bindings.
+  //
+  // D1 is the ONLY durable store. There is no object store: uploaded workbooks
+  // are validated in the request that carries them and are never persisted, so
+  // everything CanteenHub can recover lives in this database.
   DB: D1Database;
-
-  // R2 bucket holding the original uploaded import files. Optional in the type
-  // so a deployment without the binding fails with a clear, handled error
-  // rather than a runtime crash deep inside a request.
-  IMPORTS?: R2Bucket;
 
   // The built SPA, so the Worker can serve index.html for a client-side route.
   // Optional in the type: a deployment without it still serves the API, and the

@@ -100,12 +100,18 @@ export type ValidateResult =
  *
  * Claims the batch by moving it to `validating` first, so two concurrent
  * validate calls cannot both run. Every terminal path leaves the batch in a
- * state an administrator can act on; the archived file is never deleted.
+ * state an administrator can act on.
+ *
+ * The workbook arrives as bytes, not as a loader: CanteenHub keeps no object
+ * store, so the only moment the file exists is the request that carried it.
+ * Everything downstream - preview, confirm, commit - reads the staged rows in
+ * `import_batch_rows`, never the file, which is why dropping the bytes after
+ * this call costs the workflow nothing.
  */
 export async function validateImport(
   db: D1Database,
   batchId: number,
-  loadFile: () => Promise<ArrayBuffer | null>
+  file: ArrayBuffer
 ): Promise<ValidateResult> {
   const batch = await getImportBatch(db, batchId);
   if (!batch) {
@@ -116,7 +122,9 @@ export async function validateImport(
     return { kind: 'conflict', reason: 'This import has already been committed.' };
   }
 
-  // Re-validation is allowed from any non-committed resting state.
+  // Any non-committed resting state can be validated. In practice this only
+  // ever runs from `pending`, because the bytes exist for exactly one request:
+  // re-validating means uploading again, which creates a new batch.
   const claimed = await transitionStatus(
     db,
     batchId,
@@ -144,16 +152,6 @@ export async function validateImport(
 
     const updated = await getImportBatch(db, batchId);
     return { kind: 'not_implemented', batch: updated! };
-  }
-
-  const file = await loadFile();
-  if (!file) {
-    const reason = 'The archived file for this import could not be read.';
-    await transitionStatus(db, batchId, 'validating', 'validation_failed', {
-      failureReason: reason,
-    });
-    const updated = await getImportBatch(db, batchId);
-    return { kind: 'failed', batch: updated!, fileMessages: [reason] };
   }
 
   let outcome: ValidationOutcome;
@@ -208,8 +206,10 @@ export type CommitResult =
  * was, the protection.
  *
  * The batch is marked `committed` only AFTER the production write succeeds. If
- * the committer throws, the batch lands in `commit_failed` with its file and
- * staged rows intact, so the evidence survives and the attempt can be retried.
+ * the committer throws, the batch lands in `commit_failed` with its staged rows
+ * intact, so the evidence survives. Retrying means uploading the workbook
+ * again: the rows that would be written are still on record, but the bytes that
+ * produced them were never stored.
  */
 export async function commitImport(
   db: D1Database,

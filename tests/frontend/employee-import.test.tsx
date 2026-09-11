@@ -43,7 +43,6 @@ function batch(overrides: Record<string, unknown> = {}) {
     original_filename: 'synthetic-employees.xlsx',
     file_size_bytes: 2048,
     content_sha256: 'a'.repeat(64),
-    file_archived: true,
     uploaded_by: ADMIN_USER.id,
     uploaded_by_name: ADMIN_USER.full_name,
     uploaded_by_amco_id: ADMIN_USER.amco_id,

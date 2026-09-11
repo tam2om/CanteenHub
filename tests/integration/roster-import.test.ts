@@ -13,7 +13,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import app from '../../src/worker/index.js';
 import { createTestDb, type TestD1Database } from '../helpers/d1.js';
-import { createTestR2, type TestR2Bucket } from '../helpers/r2.js';
 import { buildRosterWorkbook, buildWorkbook, rosterRow, rosterHeaders } from '../helpers/xlsxFixture.js';
 import {
   testEnv,
@@ -35,15 +34,13 @@ const YEAR = 2027;
 
 describe('Shift roster Excel import', () => {
   let db: TestD1Database;
-  let bucket: TestR2Bucket;
   let env: ReturnType<typeof testEnv>;
   let admin: SeededEmployee;
   let shiftWorker: SeededEmployee;
 
   beforeEach(async () => {
     db = createTestDb();
-    bucket = createTestR2();
-    env = testEnv(db, bucket);
+    env = testEnv(db);
     admin = await seedEmployee(db, { amcoId: 'TEST900', roleId: ROLE_ADMIN });
     shiftWorker = await seedEmployee(db, { amcoId: 'TEST100', rosterType: 'shift' });
   });
@@ -949,9 +946,13 @@ describe('Shift roster Excel import', () => {
   // ==========================================================================
 
   describe('state machine', () => {
-    it('cannot commit before validation', async () => {
-      const res = await uploadWorkbook(buildRosterWorkbook([ROW_BASIC]));
-      const batch = (await readJson(res)).data as { id: number };
+    it('cannot commit a batch that did not pass validation', async () => {
+      // Validation now runs during the upload, so "before validation" is no
+      // longer a reachable state. The guard that matters is unchanged: only a
+      // batch in `preview` may be committed.
+      const res = await uploadWorkbook(buildRosterWorkbook([rosterRow('NOSUCH', 9, 2026, { 1: 'Day' })]));
+      const batch = (await readJson(res)).data as { id: number; status: string };
+      expect(batch.status).toBe('validation_failed');
 
       const commitRes = await commit(batch.id);
       expect(commitRes.status).toBe(409);
@@ -1050,17 +1051,39 @@ describe('Shift roster Excel import', () => {
   // ==========================================================================
 
   describe('R2 and history', () => {
-    it('preserves the ORIGINAL workbook in R2, unmodified', async () => {
+    it('records what the workbook WAS without keeping the workbook', async () => {
+      // The bytes are gone the moment the upload request ends - there is no
+      // object store. What survives is the description: the name the
+      // administrator recognises, the size, and a SHA-256 that can still prove
+      // a given file produced this import.
       const bytes = buildRosterWorkbook([ROW_BASIC]);
       const res = await uploadWorkbook(bytes);
-      const batch = (await readJson(res)).data as { id: number };
+      const batch = (await readJson(res)).data as {
+        id: number;
+        original_filename: string;
+        file_size_bytes: number;
+        content_sha256: string;
+      };
 
-      await validate(batch.id);
       await commit(batch.id);
 
-      const stored = bucket.objects.get(`imports/roster/${batch.id}/source.xlsx`);
-      expect(stored).toBeDefined();
-      expect(new Uint8Array(stored!.body)).toEqual(bytes);
+      expect(batch.file_size_bytes).toBe(bytes.length);
+      expect(batch.content_sha256).toMatch(/^[0-9a-f]{64}$/);
+
+      const expected = await crypto.subtle.digest('SHA-256', bytes as unknown as BufferSource);
+      const hex = [...new Uint8Array(expected)].map((b) => b.toString(16).padStart(2, '0')).join('');
+      expect(batch.content_sha256).toBe(hex);
+
+      // Nothing anywhere holds the file itself.
+      const row = await db
+        .prepare('SELECT * FROM import_batches WHERE id = ?')
+        .bind(batch.id)
+        .first<Record<string, unknown>>();
+      for (const value of Object.values(row!)) {
+        expect(value).not.toBeInstanceOf(ArrayBuffer);
+        expect(value).not.toBeInstanceOf(Uint8Array);
+      }
+      expect(row!.r2_object_key).toBeNull();
     });
 
     it('import history shows the roster import with its result', async () => {
@@ -1074,7 +1097,10 @@ describe('Shift roster Excel import', () => {
 
       expect(found.import_type).toBe('roster');
       expect(found.status).toBe('committed');
-      expect(found.file_archived).toBe(true);
+      expect(found.file_archived).toBeUndefined();
+      // History describes the file without claiming to hold it.
+      expect(found.original_filename).toBeTruthy();
+      expect(found.content_sha256).toMatch(/^[0-9a-f]{64}$/);
     });
   });
 

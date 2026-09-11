@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import app from '../../src/worker/index.js';
 import { createTestDb, type TestD1Database } from '../helpers/d1.js';
-import { createTestR2, fakeXlsxBytes, notAZipFile, legacyXlsBytes, type TestR2Bucket } from '../helpers/r2.js';
+import { fakeXlsxBytes, notAZipFile, legacyXlsBytes } from '../helpers/uploads.js';
 import {
   testEnv,
   seedEmployee,
@@ -45,7 +45,6 @@ function uploadRequest(
 
 describe('Import foundation', () => {
   let db: TestD1Database;
-  let bucket: TestR2Bucket;
   let env: ReturnType<typeof testEnv>;
   let admin: SeededEmployee;
   let superAdmin: SeededEmployee;
@@ -53,8 +52,7 @@ describe('Import foundation', () => {
 
   beforeEach(async () => {
     db = createTestDb();
-    bucket = createTestR2();
-    env = testEnv(db, bucket);
+    env = testEnv(db);
     admin = await seedEmployee(db, { amcoId: 'TEST900', roleId: ROLE_ADMIN });
     superAdmin = await seedEmployee(db, { amcoId: 'TEST901', roleId: ROLE_SUPER_ADMIN });
     employee = await seedEmployee(db, { amcoId: 'TEST001', rosterType: 'regular' });
@@ -121,7 +119,7 @@ describe('Import foundation', () => {
     it('a refused request mutates nothing', async () => {
       await upload(employee.cookie);
       expect(await countRows(db, 'SELECT COUNT(*) as n FROM import_batches')).toBe(0);
-      expect(bucket.objects.size).toBe(0);
+      expect(await countRows(db, 'SELECT COUNT(*) as n FROM import_batch_rows')).toBe(0);
       expect(await countRows(db, 'SELECT COUNT(*) as n FROM audit_log')).toBe(0);
     });
 
@@ -130,11 +128,13 @@ describe('Import foundation', () => {
       await validate(batch.id, employee.cookie);
       await commit(batch.id, employee.cookie);
 
+      // The batch is left exactly as the admin's upload left it: a refused
+      // request changes no state.
       const row = await db
         .prepare('SELECT status FROM import_batches WHERE id = ?')
         .bind(batch.id)
         .first<{ status: string }>();
-      expect(row!.status).toBe('pending');
+      expect(row!.status).toBe(batch.status);
     });
 
     it('both admin and super_admin are accepted', async () => {
@@ -150,50 +150,71 @@ describe('Import foundation', () => {
   // ==========================================================================
 
   describe('upload', () => {
-    it('accepts a valid workbook and creates a pending batch', async () => {
+    it('accepts a valid workbook and validates it in the same request', async () => {
+      // No object store means the bytes exist for exactly one request, so the
+      // parse happens here. The batch therefore comes back already validated
+      // rather than sitting at `pending` waiting for a second call to fetch a
+      // file that nothing kept.
       const res = await upload(admin.cookie);
       expect(res.status).toBe(201);
 
       const body = await readJson(res);
       expect(body.success).toBe(true);
-      expect(body.data.status).toBe('pending');
       expect(body.data.import_type).toBe('employees');
       expect(body.data.original_filename).toBe('staff-list.xlsx');
       expect(body.data.uploaded_by).toBe(admin.id);
-      expect(body.data.file_archived).toBe(true);
-      // States plainly that no parser exists yet.
+      // No validator is registered in this suite, so the honest outcome is a
+      // recorded failure - never `pending`, which would imply work still to do.
+      expect(body.data.status).toBe('validation_failed');
       expect(body.data.importer_available).toBe(false);
+      expect(body.data.outcome).toBe('not_implemented');
     });
 
-    it('stores the object under a deterministic key derived from the batch id', async () => {
-      const batch = await uploadOk();
+    it('never reports an archive, because there is none', async () => {
+      const res = await upload(admin.cookie);
+      const raw = JSON.stringify(await readJson(res));
 
-      const expectedKey = `imports/employees/${batch.id}/source.xlsx`;
-      expect(bucket.objects.has(expectedKey)).toBe(true);
-
-      const stored = bucket.objects.get(expectedKey)!;
-      expect(stored.customMetadata?.import_batch_id).toBe(String(batch.id));
-      expect(stored.customMetadata?.original_filename).toBe('staff-list.xlsx');
+      // A `file_archived` flag - true OR false - would describe storage this
+      // application does not have.
+      expect(raw).not.toContain('file_archived');
+      expect(raw).not.toContain('r2_object_key');
+      expect(raw).not.toContain('source.xlsx');
     });
 
-    it('the uploaded filename never steers the storage key', async () => {
-      const res = await upload(admin.cookie, { filename: '../../etc/passwd.xlsx' });
-      expect(res.status).toBe(201);
-      const batch = (await readJson(res)).data as { id: number };
-
-      const keys = [...bucket.objects.keys()];
-      expect(keys).toEqual([`imports/employees/${batch.id}/source.xlsx`]);
-      expect(keys[0]).not.toContain('..');
-      expect(keys[0]).not.toContain('passwd');
-    });
-
-    it('archives the exact bytes uploaded', async () => {
-      const bytes = fakeXlsxBytes(128);
+    it('persists no part of the uploaded bytes anywhere in the database', async () => {
+      const bytes = fakeXlsxBytes(256);
       const res = await upload(admin.cookie, { bytes });
       const batch = (await readJson(res)).data as { id: number };
 
-      const stored = bucket.objects.get(`imports/employees/${batch.id}/source.xlsx`)!;
-      expect(new Uint8Array(stored.body)).toEqual(bytes);
+      const row = await db
+        .prepare('SELECT * FROM import_batches WHERE id = ?')
+        .bind(batch.id)
+        .first<Record<string, unknown>>();
+
+      expect(row!.r2_object_key).toBeNull();
+
+      // A recognisable slice of the upload must appear in no column, and no
+      // column may hold binary at all.
+      const marker = [...bytes.slice(4, 20)].map((b) => String.fromCharCode(b)).join('');
+      for (const value of Object.values(row!)) {
+        expect(value).not.toBeInstanceOf(ArrayBuffer);
+        expect(value).not.toBeInstanceOf(Uint8Array);
+        if (typeof value === 'string') expect(value).not.toContain(marker);
+      }
+    });
+
+    it('a hostile filename is recorded verbatim but addresses nothing', async () => {
+      // There is no key to traverse any more. The name is data for display, and
+      // must still never be treated as a path.
+      const res = await upload(admin.cookie, { filename: '../../etc/passwd.xlsx' });
+      expect(res.status).toBe(201);
+
+      const body = await readJson(res);
+      expect(body.data.original_filename).toBe('../../etc/passwd.xlsx');
+
+      const raw = JSON.stringify(body);
+      expect(raw).not.toContain('imports/');
+      expect(raw).not.toContain('source.xlsx');
     });
 
     it('records size and a SHA-256 content hash', async () => {
@@ -230,7 +251,7 @@ describe('Import foundation', () => {
       const res = await upload(admin.cookie, { filename: 'evil.xlsx', bytes: notAZipFile() });
       expect(res.status).toBe(400);
       expect((await readJson(res)).error).toContain('not a valid Excel workbook');
-      expect(bucket.objects.size).toBe(0);
+      expect(await countRows(db, 'SELECT COUNT(*) as n FROM import_batches')).toBe(0);
     });
 
     it('rejects a legacy .xls with a useful message', async () => {
@@ -283,58 +304,81 @@ describe('Import foundation', () => {
   // ==========================================================================
 
   describe('failure handling', () => {
-    it('an R2 failure does not leave a falsely usable import', async () => {
-      bucket.failNextPut();
+    it('a workbook that cannot be parsed is recorded, not silently accepted', async () => {
+      // The old shape of this test was "an R2 put failed". There is no put to
+      // fail any more; the equivalent real failure is a validator that throws.
+      VALIDATORS.employees = async () => {
+        throw new Error('parser exploded');
+      };
 
       const res = await upload(admin.cookie);
-      expect(res.status).toBe(502);
+      expect(res.status).toBe(201);
 
-      // The batch survives as evidence, but is marked failed with no object key
-      // and cannot be mistaken for something ready to commit.
+      const body = await readJson(res);
+      expect(body.data.status).toBe('validation_failed');
+      expect(body.data.outcome).toBe('failed');
+
       const row = await db
-        .prepare('SELECT status, r2_object_key, failure_reason FROM import_batches')
-        .first<{ status: string; r2_object_key: string | null; failure_reason: string }>();
+        .prepare('SELECT status, failure_reason FROM import_batches')
+        .first<{ status: string; failure_reason: string }>();
 
+      // The batch survives as evidence and cannot be mistaken for committable.
       expect(row!.status).toBe('validation_failed');
-      expect(row!.r2_object_key).toBeNull();
-      expect(row!.failure_reason).toContain('could not be archived');
-      expect(bucket.objects.size).toBe(0);
+      expect(row!.failure_reason).toBeTruthy();
+      // The operator-facing reason must not carry the exception's text.
+      expect(row!.failure_reason).not.toContain('parser exploded');
     });
 
-    it('refuses the upload when no storage binding is configured', async () => {
-      const envWithoutR2 = testEnv(db); // no bucket supplied
-      const res = await app.request(IMPORTS, uploadRequest(admin.cookie), envWithoutR2);
+    it('an upload needs no storage binding at all', async () => {
+      // This replaces "refuses the upload when no storage binding is
+      // configured". The whole point of the change is that there is nothing to
+      // configure: an env with only DB must work.
+      const dbOnly = testEnv(db);
+      expect((dbOnly as unknown as Record<string, unknown>).IMPORTS).toBeUndefined();
 
-      expect(res.status).toBe(503);
-      // No half-created batch when storage is simply absent.
-      expect(await countRows(db, 'SELECT COUNT(*) as n FROM import_batches')).toBe(0);
+      const res = await app.request(IMPORTS, uploadRequest(admin.cookie), dbOnly);
+
+      expect(res.status).toBe(201);
+      expect(await countRows(db, 'SELECT COUNT(*) as n FROM import_batches')).toBe(1);
     });
 
-    it('validation failure preserves the batch and the archived file', async () => {
+    it('validation failure preserves the batch and its staged evidence', async () => {
+      VALIDATORS.employees = async () => ({
+        rows: [{ rowNumber: 2, status: 'invalid' as const, messages: ['Row is wrong.'] }],
+        fileMessages: ['1 row cannot be imported.'],
+        passed: false,
+      });
+
       const batch = await uploadOk();
-      await validate(batch.id);
 
       const row = await db
-        .prepare('SELECT status, r2_object_key FROM import_batches WHERE id = ?')
+        .prepare('SELECT status, validation_summary FROM import_batches WHERE id = ?')
         .bind(batch.id)
-        .first<{ status: string; r2_object_key: string }>();
+        .first<{ status: string; validation_summary: string }>();
 
       expect(row!.status).toBe('validation_failed');
-      expect(row!.r2_object_key).not.toBeNull();
-      expect(bucket.objects.has(row!.r2_object_key)).toBe(true);
+      expect(row!.validation_summary).toContain('1 row cannot be imported.');
+
+      // The staged rows outlive the file they came from.
+      expect(
+        await countRows(db, 'SELECT COUNT(*) as n FROM import_batch_rows WHERE import_batch_id = ' + batch.id)
+      ).toBe(1);
     });
 
-    it('a missing archived object is reported, not silently treated as valid', async () => {
-      VALIDATORS.employees = async () => ({ rows: [], fileMessages: [], passed: true });
-
+    it('a batch that never validated reports so, and says to upload again', async () => {
+      // `pending` is now only reachable by direct manipulation. Asking for its
+      // validation result must not invent one - it must send the administrator
+      // back to the upload, because nothing kept the bytes.
       const batch = await uploadOk();
-      bucket.failNextGet();
+      await db
+        .prepare("UPDATE import_batches SET status = 'pending', validation_summary = NULL WHERE id = ?")
+        .bind(batch.id)
+        .run();
 
       const res = await validate(batch.id);
-      const body = await readJson(res);
 
-      expect(body.data.outcome).toBe('failed');
-      expect(body.data.status).toBe('validation_failed');
+      expect(res.status).toBe(409);
+      expect((await readJson(res)).error).toMatch(/upload the workbook again/i);
     });
 
     it('a committer that throws leaves the batch commit_failed, never committed', async () => {
@@ -368,9 +412,14 @@ describe('Import foundation', () => {
   // ==========================================================================
 
   describe('state machine', () => {
-    it('a new upload starts as pending', async () => {
+    it('a new upload comes back already validated, never left at pending', async () => {
+      // `pending` used to be where a batch waited for a second request to fetch
+      // its archived file. With no archive there is nothing to wait for, and a
+      // batch resting at `pending` would be a batch whose bytes are gone and
+      // whose work can never be done.
       const batch = await uploadOk();
-      expect(batch.status).toBe('pending');
+      expect(batch.status).not.toBe('pending');
+      expect(['preview', 'validation_failed']).toContain(batch.status);
     });
 
     it('an unimplemented import type does NOT pretend validation succeeded', async () => {
@@ -601,15 +650,20 @@ describe('Import foundation', () => {
       expect(body.data.preview_rows[1].messages).toEqual(['Missing name']);
     });
 
-    it('never exposes the R2 object key or the file itself', async () => {
+    it('exposes no storage addressing and claims no archive', async () => {
       const batch = await uploadOk();
       const raw = JSON.stringify(await readJson(await get(batch.id)));
 
       expect(raw).not.toContain('r2_object_key');
       expect(raw).not.toContain('imports/employees/');
       expect(raw).not.toContain('source.xlsx');
-      // But it does say a file is archived.
-      expect(raw).toContain('file_archived');
+      // And it no longer says a file is archived, because none is.
+      expect(raw).not.toContain('file_archived');
+
+      // What it does still carry is the file's description.
+      expect(raw).toContain('original_filename');
+      expect(raw).toContain('content_sha256');
+      expect(raw).toContain('file_size_bytes');
     });
   });
 

@@ -12,7 +12,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import app from '../../src/worker/index.js';
 import { createTestDb, type TestD1Database } from '../helpers/d1.js';
-import { createTestR2, type TestR2Bucket } from '../helpers/r2.js';
 import { buildMenuWorkbook, buildWorkbook, menuRow, MENU_HEADERS } from '../helpers/xlsxFixture.js';
 import {
   testEnv,
@@ -40,14 +39,12 @@ const ROW_B = menuRow('2027-03-02', 'Test Main Gamma', 'Test Main Delta', { day:
 
 describe('Lunch menu Excel import', () => {
   let db: TestD1Database;
-  let bucket: TestR2Bucket;
   let env: ReturnType<typeof testEnv>;
   let admin: SeededEmployee;
 
   beforeEach(async () => {
     db = createTestDb();
-    bucket = createTestR2();
-    env = testEnv(db, bucket);
+    env = testEnv(db);
     admin = await seedEmployee(db, { amcoId: 'TEST900', roleId: ROLE_ADMIN });
   });
 
@@ -1001,9 +998,14 @@ describe('Lunch menu Excel import', () => {
   // ==========================================================================
 
   describe('state machine', () => {
-    it('cannot commit before validation', async () => {
-      const res = await uploadWorkbook(buildMenuWorkbook([ROW_A]));
-      const batch = (await readJson(res)).data as { id: number };
+    it('cannot commit a batch that did not pass validation', async () => {
+      // Validation now runs during the upload, so "before validation" is no
+      // longer a reachable state. The guard that matters is unchanged: only a
+      // batch in `preview` may be committed.
+      const res = await uploadWorkbook(buildMenuWorkbook([menuRow('not-a-date', 'A', 'B', {})]));
+      const batch = (await readJson(res)).data as { id: number; status: string };
+      expect(batch.status).toBe('validation_failed');
+
       expect((await commit(batch.id)).status).toBe(409);
       expect(await countRows(db, 'SELECT COUNT(*) as n FROM menu_days')).toBe(0);
     });
@@ -1077,16 +1079,39 @@ describe('Lunch menu Excel import', () => {
       expect(parsed.changes).toContainEqual({ field: 'option_1', from: 'Old Alpha', to: 'Test Main Alpha' });
     });
 
-    it('preserves the ORIGINAL workbook in R2, unmodified', async () => {
+    it('records what the workbook WAS without keeping the workbook', async () => {
+      // The bytes are gone the moment the upload request ends - there is no
+      // object store. What survives is the description: the name the
+      // administrator recognises, the size, and a SHA-256 that can still prove
+      // a given file produced this import.
       const bytes = buildMenuWorkbook([ROW_A]);
       const res = await uploadWorkbook(bytes);
-      const batch = (await readJson(res)).data as { id: number };
-      await validate(batch.id);
+      const batch = (await readJson(res)).data as {
+        id: number;
+        original_filename: string;
+        file_size_bytes: number;
+        content_sha256: string;
+      };
+
       await commit(batch.id);
 
-      const stored = bucket.objects.get(`imports/menu/${batch.id}/source.xlsx`);
-      expect(stored).toBeDefined();
-      expect(new Uint8Array(stored!.body)).toEqual(bytes);
+      expect(batch.file_size_bytes).toBe(bytes.length);
+      expect(batch.content_sha256).toMatch(/^[0-9a-f]{64}$/);
+
+      const expected = await crypto.subtle.digest('SHA-256', bytes as unknown as BufferSource);
+      const hex = [...new Uint8Array(expected)].map((b) => b.toString(16).padStart(2, '0')).join('');
+      expect(batch.content_sha256).toBe(hex);
+
+      // Nothing anywhere holds the file itself.
+      const row = await db
+        .prepare('SELECT * FROM import_batches WHERE id = ?')
+        .bind(batch.id)
+        .first<Record<string, unknown>>();
+      for (const value of Object.values(row!)) {
+        expect(value).not.toBeInstanceOf(ArrayBuffer);
+        expect(value).not.toBeInstanceOf(Uint8Array);
+      }
+      expect(row!.r2_object_key).toBeNull();
     });
   });
 

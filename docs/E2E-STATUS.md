@@ -31,7 +31,8 @@ behaviour and a true page reload are exercised by neither layer.
 
 The gap named above was exercised by hand in Phase 7: a real Chromium driven
 against a real Worker (`wrangler dev`, `--local-protocol https` so the `Secure`
-cookie behaves as it will in production) with a seeded local D1 and R2. **No
+cookie behaves as it will in production) with a seeded local D1 and R2 (R2 has
+since been removed — see `ARCHITECTURE.md` §0.0). **No
 browser framework was added to the repository** — the driver script lived
 outside it and is not committed, so the finding below is reproducible only by
 repeating the exercise, not by `npm test`.
