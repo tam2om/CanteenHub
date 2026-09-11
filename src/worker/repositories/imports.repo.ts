@@ -202,7 +202,18 @@ export async function saveValidationResults(
   // Multi-row INSERTs rather than one statement per row: D1 allows only 50
   // queries per invocation on the free plan, so a 500-row workbook must not
   // become 500 statements.
-  const CHUNK = 50;
+  //
+  // But the chunk size is bounded by D1's OTHER limit - at most 100 bound
+  // parameters per statement - and each row binds five of them. Chunking by
+  // rows alone conflated the two: 50 rows bound 250 parameters and D1 answered
+  // "too many SQL variables", which left the batch stuck in `validating` with
+  // no staged rows. It failed at 21 rows, so every workbook of real size - a
+  // 30-day menu, any actual employee list or roster - could never be validated.
+  // Derived from the two constants rather than written as a literal, so adding
+  // a sixth column narrows the chunk instead of silently breaking it again.
+  const D1_MAX_BOUND_PARAMS = 100;
+  const PARAMS_PER_ROW = 5;
+  const CHUNK = Math.floor(D1_MAX_BOUND_PARAMS / PARAMS_PER_ROW);
   for (let i = 0; i < rows.length; i += CHUNK) {
     const chunk = rows.slice(i, i + CHUNK);
     const values = chunk.map(() => '(?, ?, ?, ?, ?)').join(', ');

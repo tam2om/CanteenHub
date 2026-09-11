@@ -218,10 +218,17 @@ requirements (condiment, beverage, dessert/fruit):
 | Column | Internal `component_type` |
 |---|---|
 | `Option Meal 1` | `salad` |
-| `Option Meal 2` | `side` |
+| `Option Meal 2` | `other` |
 | `Condiment` | `condiment` |
 | `Beverage` | `beverage` |
 | `Dessert / Fruits` | `dessert` |
+
+**Correction, Phase 7:** this table first proposed `side` for `Option Meal 2`.
+The shipped schema's CHECK constraint allows only `condiment`, `beverage`,
+`dessert`, `salad`, `soup`, `bread` and `other`, so the importer maps that
+column to `other` and says so in its own header comment. Verified against a
+committed 30-day import: 30 `salad`, 30 `other`, 20 `condiment`, 30 `beverage`,
+24 `dessert`. The table above now matches the code; the code was never wrong.
 
 `schema.proposal.sql` has been updated accordingly. The normalized
 `menu_components` table absorbs this without a structural change — which is
@@ -287,7 +294,7 @@ instead of five:
 |---|---|---|
 | Choice A | `Option 1` | `Main Item` |
 | Choice B | `Option 2` | `Optional Alternative` |
-| Components | 5 (salad, side, condiment, beverage, dessert) | 2 (accompaniment, drinks) |
+| Components | 5 (salad, other, condiment, beverage, dessert) | 2 (accompaniment, drinks) |
 
 The requirements describe a **lunch-only** system: "For lunch, the company
 provides two meal options each day." Dinner is never mentioned. Yet a dinner
