@@ -3,6 +3,14 @@
 **Verified against the actual files, 2026-09-09.** This document replaces the
 assumptions made in `ARCHITECTURE.md` §13 before the files were available.
 
+**Phase 8 update — the real workbook has now been run through the importers**,
+not merely read. `All Employees` and `Shifts roster` were both uploaded,
+validated, previewed and committed against a throwaway D1 through the live HTTP
+API. Results in `PHASE8-RELEASE-AUDIT.md` §3; the headline is that every claim
+below held, including the referential finding. **The lunch and dinner menus are
+still PDFs** — no menu `.xlsx` exists anywhere — so §3 remains analysis rather
+than importer validation.
+
 Files examined:
 
 | File | Type | Contents |

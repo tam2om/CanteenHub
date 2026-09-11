@@ -265,3 +265,109 @@ describe('Action buttons cannot push the page sideways', () => {
     expect(css).toMatch(/\.panel__actions \.button \{ flex: 1; \}/);
   });
 });
+
+/**
+ * Brute-force protection on the login endpoint.
+ *
+ * The Phase 8 audit found this security control had no test at all: the only
+ * reference to `login_attempts` anywhere under tests/ was the maintenance cron
+ * purging it. The limiter works - five failures lock the account for fifteen
+ * minutes, and a correct password is refused while it holds - but nothing
+ * stopped a refactor from removing it silently, which is exactly how the three
+ * Phase 7 defects survived a green suite.
+ */
+describe('Login rate limiting', () => {
+  let db: TestD1Database;
+  let env: ReturnType<typeof testEnv>;
+  const PASSWORD = 'Correct!2026';
+  const IP = '203.0.113.7';
+
+  beforeEach(async () => {
+    db = createTestDb();
+    env = testEnv(db, createTestR2());
+    const employee = await seedEmployee(db, { amcoId: 'TEST600' });
+    await setEmployeePasswordDirect(db, employee.id, PASSWORD);
+  });
+
+  const login = (
+    password: string,
+    { amcoId = 'TEST600', ip = IP }: { amcoId?: string; ip?: string } = {}
+  ) =>
+    app.request(
+      `${BASE}/api/auth/login`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': ip },
+        body: JSON.stringify({ amco_id: amcoId, password }),
+      },
+      env
+    );
+
+  it('allows five failures and locks the sixth', async () => {
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      const res = await login('wrong-password');
+      expect(res.status, `attempt ${attempt} should still be a plain refusal`).toBe(401);
+    }
+
+    const locked = await login('wrong-password');
+    expect(locked.status).toBe(429);
+  });
+
+  it('refuses the CORRECT password while the lockout holds', async () => {
+    // The point of a lockout: guessing does not become cheaper by eventually
+    // guessing right.
+    for (let attempt = 0; attempt < 5; attempt += 1) await login('wrong-password');
+
+    const res = await login(PASSWORD);
+    expect(res.status).toBe(429);
+  });
+
+  it('says how long to wait, and leaks nothing about the account', async () => {
+    for (let attempt = 0; attempt < 5; attempt += 1) await login('wrong-password');
+
+    const body = await readJson<{ error: string }>(await login('wrong-password'));
+    expect(body.error).toMatch(/too many failed login attempts/i);
+    expect(body.error).toMatch(/minute/i);
+    expect(body.error).not.toMatch(/hash|pbkdf2|sql|TEST600/i);
+  });
+
+  it('scopes the lockout to one IP, so nobody can lock a colleague out', async () => {
+    for (let attempt = 0; attempt < 6; attempt += 1) await login('wrong-password', { ip: IP });
+    expect((await login(PASSWORD, { ip: IP })).status).toBe(429);
+
+    // The same account from a different address is unaffected.
+    const elsewhere = await login(PASSWORD, { ip: '198.51.100.22' });
+    expect(elsewhere.status).toBe(200);
+  });
+
+  it('scopes the lockout to one account, so one victim does not lock the office out', async () => {
+    const other = await seedEmployee(db, { amcoId: 'TEST601' });
+    await setEmployeePasswordDirect(db, other.id, PASSWORD);
+
+    for (let attempt = 0; attempt < 6; attempt += 1) await login('wrong-password');
+
+    const otherAccount = await login(PASSWORD, { amcoId: 'TEST601' });
+    expect(otherAccount.status).toBe(200);
+  });
+
+  it('records an attempt for an unknown AMCO ID without revealing it is unknown', async () => {
+    const res = await login('anything', { amcoId: 'NOSUCHID' });
+
+    expect(res.status).toBe(401);
+    const body = await readJson<{ error: string }>(res);
+    expect(body.error).toBe('Invalid credentials');
+
+    // Enumeration must cost the same as guessing a real account's password.
+    const recorded = await db
+      .prepare('SELECT COUNT(*) AS n FROM login_attempts WHERE identifier = ?')
+      .bind(`${IP}:NOSUCHID`)
+      .first<{ n: number }>();
+    expect(recorded?.n).toBe(1);
+  });
+
+  it('does not lock an account out on successful logins', async () => {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      expect((await login(PASSWORD)).status).toBe(200);
+    }
+  });
+});

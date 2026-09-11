@@ -21,7 +21,6 @@
   "dependencies": {
     "@tanstack/react-query": "^5.102.8",
     "hono": "^4.13.7",
-    "jose": "^6.2.12",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.3"
