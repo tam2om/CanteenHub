@@ -1,7 +1,7 @@
 # CanteenHub Worker configuration.
 #
 # NOTE ON ENVIRONMENTS: Wrangler does NOT inherit bindings or vars into named
-# environments. d1_databases, r2_buckets and vars are "non-inheritable" keys, so
+# environments. d1_databases and vars are "non-inheritable" keys, so
 # every one of them must be repeated under [env.production]. Omitting the D1
 # binding there does not fall back to the top-level one - it leaves env.DB
 # undefined and every request fails at runtime.
@@ -29,12 +29,6 @@ binding = "DB"
 database_name = "canteenhub-local"
 database_id = "local-dev"
 migrations_dir = "migrations"
-
-# R2 bucket binding - archival of original uploaded import files.
-# D1 stores only metadata and the object key; the workbook binary lives here.
-[[r2_buckets]]
-binding = "IMPORTS"
-bucket_name = "canteenhub-imports-local"
 
 # Environment variables (do NOT put secrets here).
 [vars]
@@ -68,10 +62,6 @@ binding = "DB"
 database_name = "canteenhub-prod"
 database_id = "REPLACE_WITH_PRODUCTION_D1_DATABASE_ID"
 migrations_dir = "migrations"
-
-[[env.production.r2_buckets]]
-binding = "IMPORTS"
-bucket_name = "canteenhub-imports"
 
 [env.production.vars]
 ENVIRONMENT = "production"

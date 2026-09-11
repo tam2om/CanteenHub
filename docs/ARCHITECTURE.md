@@ -15,6 +15,43 @@ Date: 2026-09-09 · **Revised** after reviewing the actual source files.
 
 ---
 
+## 0.0 SUPERSEDING DECISION — R2 removed, D1 is the only store
+
+**Decided after Phase 8, and it overrides every mention of R2 below.**
+
+CanteenHub must run on Cloudflare services that cost **nothing and require no
+payment details on the account**. Enabling an R2 subscription asks for billing
+information even though the usage would sit inside R2's free allowance, so R2 is
+out of the architecture entirely.
+
+What replaced it: **an uploaded workbook is parsed in the request that carries
+it and is never persisted.** Validation stages its results into
+`import_batch_rows`, and preview, confirm and commit all read those staged rows.
+The file was only ever the input to validation, and commit never read it — so
+nothing in the five-stage workflow was lost.
+
+| | |
+|---|---|
+| **Still kept, in D1** | `import_batches`, `import_batch_rows`, `original_filename`, `file_size_bytes`, `content_sha256`, validation summary, failure reason, counts, commit state, full audit history, idempotency |
+| **Gone** | The original `.xlsx` bytes. They cannot be recovered after the request that uploaded them — not from a backup, not from a restore |
+| **Consequence** | Re-validating means re-uploading. `content_sha256` still proves *which* file produced an import; it cannot reproduce the file |
+| **Gain** | **D1 is the single recoverable store.** The D1/R2 split that §16 and `RECOVERY.md` warned about — a restore orphaning objects, a deleted object stranding a D1 row — cannot happen any more |
+
+**Sections below that are superseded by this decision**, and describe an
+architecture that is not what shipped: the R2 rows in §0's constraints table,
+the R2 box in the §2 diagram, the R2 export in §3's cron description, §11's
+"original uploaded file is stored in R2", §13's upload-to-R2 flow, §16's Layer 2
+nightly R2 export and the recovery scenarios that depend on it, and the R2
+entries in §19, §22 and §23.
+
+Several of those describe work that was **never built at all** — nightly logical
+exports, report snapshots, `import_batch_rows` retention pruning, and
+browser-side Excel parsing (the shipped importer parses in the Worker). They are
+left in place as the original design record rather than quietly rewritten. Read
+them as history, not as a description of the system.
+
+---
+
 ## 0. Verified platform facts this design is built on
 
 Every Cloudflare number below was read from official documentation during this discovery pass, not from memory. They are load-bearing: three of them changed the design.
@@ -649,7 +686,7 @@ import_batches(
   id, import_type CHECK IN ('employees','roster','menu'),
   status CHECK IN ('uploaded','validated','previewed','committing','committed',
                    'partially_committed','failed','cancelled'),
-  original_filename, r2_object_key, file_sha256,
+  original_filename, r2_object_key, file_sha256,   -- r2_object_key: dormant since §0.0; always NULL
   uploaded_by, uploaded_at,
   row_count, new_count, updated_count, unchanged_count, error_count, conflict_count,
   committed_by, committed_at,

@@ -4,6 +4,16 @@ Audited `main` at `b4d9f15`. Every claim here was measured against a running
 Worker, a real D1 and a real browser, or read out of the code. Where something
 could not be run, it says so and says why.
 
+> **Superseded in part.** After this audit, **R2 was removed from the
+> architecture** so CanteenHub needs no paid Cloudflare service and no payment
+> details on the account. Uploaded workbooks are now parsed in the request that
+> carries them and never stored. Every R2 mention below — the archive in the
+> data-lifecycle walk, "batches with no R2 key" in the consistency sweep, the
+> R2 binding in §10, and "R2-archived" in the release matrix — describes the
+> system as it was at `f615234`. See `ARCHITECTURE.md` §0.0. Nothing else in
+> this audit changed: the same 23 consistency checks, the same security
+> findings, and the same outstanding Cloudflare items still stand.
+
 ---
 
 ## 1. Headline

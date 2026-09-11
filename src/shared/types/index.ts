@@ -186,7 +186,6 @@ export interface ImportBatch {
   import_type: ImportType;
   status: ImportStatus;
   original_filename: string;
-  r2_object_key: string | null;
   uploaded_by: number;
   record_count: number;
   error_count: number;

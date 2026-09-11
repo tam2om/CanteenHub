@@ -202,8 +202,11 @@ export type ImportRowStatus = 'valid' | 'warning' | 'invalid';
 /**
  * An import batch as the API returns it.
  *
- * Note the absence of any storage key: the server reports `file_archived`
- * rather than where the object lives.
+ * There is no storage key and no `file_archived` flag, because there is no
+ * archive: the workbook is validated in the request that uploads it and then
+ * dropped. What the file was is still described by `original_filename`,
+ * `file_size_bytes` and `content_sha256`; what it contained is in the staged
+ * rows. The bytes themselves are gone.
  */
 export interface ImportBatch {
   id: number;
@@ -212,7 +215,6 @@ export interface ImportBatch {
   original_filename: string;
   file_size_bytes: number | null;
   content_sha256: string | null;
-  file_archived: boolean;
   uploaded_by: number;
   uploaded_by_name?: string | null;
   uploaded_by_amco_id?: string | null;

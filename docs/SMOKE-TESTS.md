@@ -129,6 +129,14 @@ For each of employees, roster and menu:
 | 7.3 | Commit (confirmation required) | ✅ applied |
 | 7.4 | Re-import the **same** workbook | ✅ all UNCHANGED; ❌ nothing rewritten |
 | 7.5 | Upload a workbook with an invalid row | ✅ refused; ❌ nothing partially applied |
+| 7.6 | Commit the same batch twice | ✅ second attempt refused (409) |
+| 7.7 | Call validate on a batch repeatedly | ✅ same answer every time; ❌ no duplicate staged rows or audit entries |
+| 7.8 | Inspect any import response | ✅ carries `original_filename`, `file_size_bytes`, `content_sha256`; ❌ **no** `file_archived` or storage key — the workbook is not kept |
+
+> **No object store.** CanteenHub parses an uploaded workbook in the request that
+> carries it and never persists the bytes, so there is no bucket to check and no
+> archive to verify. Re-running an import means uploading the file again.
+> See `ARCHITECTURE.md` §0.0.
 | 7.6 | Upload a non-`.xlsx` file | ✅ refused clearly |
 | 7.7 | Upload a file over 10 MB | ✅ refused with 413 |
 | 7.8 | Try to commit twice | ✅ second attempt refused |

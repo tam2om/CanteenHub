@@ -16,19 +16,16 @@ import type { Env, Variables } from '../types/env.js';
 import { requireAuth, requireRole } from '../middleware/session.js';
 import {
   hashFileContents,
-  importObjectKey,
   isImportType,
   validateUploadedFile,
   IMPORT_TYPES,
   MAX_UPLOAD_BYTES,
 } from '../lib/importFile.js';
 import {
-  attachObjectKey,
   createImportBatch,
   getImportBatch,
   getStagedRows,
   listImportBatches,
-  transitionStatus,
   type ImportStatus,
 } from '../repositories/imports.repo.js';
 import {
@@ -55,22 +52,35 @@ const clientIp = (c: { req: { header: (n: string) => string | undefined } }) =>
 /**
  * Shape a batch for an API response.
  *
- * The R2 object key is deliberately NOT included: it is internal storage
- * addressing, and exposing it invites attempts to reach objects directly. The
- * response says whether a file is archived, not where it lives.
+ * `r2_object_key` is stripped rather than reported. CanteenHub no longer has an
+ * object store, so the column is a dormant leftover that is always NULL on new
+ * rows; surfacing it - or the old `file_archived: false` derived from it - would
+ * tell a client something untrue about where the workbook is. What the file WAS
+ * is still fully described by `original_filename`, `file_size_bytes` and
+ * `content_sha256`, all of which stay.
  */
 function toBatchResponse(batch: Record<string, unknown>) {
-  const { r2_object_key, ...rest } = batch as { r2_object_key: string | null } & Record<string, unknown>;
-  return { ...rest, file_archived: r2_object_key !== null };
+  const { r2_object_key: _unusedObjectKey, ...rest } = batch as {
+    r2_object_key: string | null;
+  } & Record<string, unknown>;
+  return rest;
 }
 
 /**
  * POST /api/admin/imports - upload a workbook and open an import batch.
  *
- * Creates the batch first, then archives the file under a key derived from the
- * batch id. If the R2 write fails the batch is left in `validation_failed` with
- * a reason and no object key - visible and retryable, never a silently orphaned
- * object or a falsely usable import.
+ * The workbook is parsed and staged in THIS request, because this request is
+ * the only time it exists. CanteenHub runs on Cloudflare's free tier with no
+ * object store, so nothing durable holds the uploaded bytes: they are read,
+ * validated into `import_batch_rows`, and dropped when the request ends.
+ *
+ * That costs the workflow nothing, because the workflow never needed them
+ * again. Preview reads staged rows; confirm is a UI step; commit replays the
+ * staged rows. The file was only ever the input to validation.
+ *
+ * The five stages are unchanged and still separately addressable - upload,
+ * validate, preview, confirm, commit. Validation simply happens where the bytes
+ * are, and `POST /:id/validate` returns the outcome that produced.
  */
 app.post('/', async (c) => {
   const db = c.env.DB;
@@ -113,16 +123,9 @@ app.post('/', async (c) => {
     return c.json({ success: false, error: check.error }, 400);
   }
 
-  const bucket = c.env.IMPORTS;
-  if (!bucket) {
-    // Fail loudly rather than creating an import whose file was never stored.
-    console.error('R2 IMPORTS binding is not configured');
-    return c.json(
-      { success: false, error: 'File storage is not configured. Contact your administrator.' },
-      503
-    );
-  }
-
+  // The fingerprint of a file we are about to forget. `content_sha256` plus
+  // `original_filename` and `file_size_bytes` is what lets an administrator
+  // later say "this import came from that workbook" without the bytes.
   const contentSha256 = await hashFileContents(bytes);
 
   const batch = await createImportBatch(db, {
@@ -132,33 +135,6 @@ app.post('/', async (c) => {
     contentSha256,
     uploadedBy: actorId,
   });
-
-  const objectKey = importObjectKey(importType, batch.id);
-
-  try {
-    await bucket.put(objectKey, buffer, {
-      httpMetadata: {
-        contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      },
-      customMetadata: {
-        import_batch_id: String(batch.id),
-        import_type: importType,
-        // Stored for display; never used to address the object.
-        original_filename: filename,
-      },
-    });
-  } catch (error) {
-    console.error('R2 put failed for import batch', batch.id, error instanceof Error ? error.name : 'unknown');
-    await transitionStatus(db, batch.id, 'pending', 'validation_failed', {
-      failureReason: 'The uploaded file could not be archived. Please try uploading again.',
-    });
-    return c.json(
-      { success: false, error: 'The file could not be stored. Please try again.', data: { id: batch.id } },
-      502
-    );
-  }
-
-  await attachObjectKey(db, batch.id, objectKey);
 
   await logImportChange(
     db,
@@ -174,15 +150,41 @@ app.post('/', async (c) => {
     clientIp(c)
   );
 
-  const stored = await getImportBatch(db, batch.id);
+  // Validate NOW, from the bytes still in memory. This is the whole of the
+  // change that removed the object store: the parse moved to the only request
+  // that holds the file, and everything it produces lands in D1.
+  const result = await validateImport(db, batch.id, buffer);
+
+  if (result.kind === 'conflict') {
+    // Unreachable for a batch created two statements ago, but a conflict here
+    // would mean the state machine disagrees with itself - say so rather than
+    // returning a batch in an unknown state.
+    return c.json({ success: false, error: result.reason }, 409);
+  }
+
+  await logImportChange(
+    db,
+    actorId,
+    batch.id,
+    'VALIDATE',
+    {
+      importType,
+      status: result.batch.status,
+      totalRows: result.batch.total_rows,
+      invalidRows: result.batch.invalid_rows,
+      reason: result.batch.failure_reason ?? undefined,
+    },
+    clientIp(c)
+  );
 
   return c.json(
     {
       success: true,
       data: {
-        ...toBatchResponse(stored as unknown as Record<string, unknown>),
-        // Say plainly that this type cannot yet be validated or committed.
-        importer_available: hasValidator(importType),
+        ...toBatchResponse(result.batch as unknown as Record<string, unknown>),
+        importer_available: result.kind !== 'not_implemented',
+        outcome: result.kind === 'not_implemented' ? 'not_implemented' : result.kind,
+        messages: result.kind === 'not_implemented' ? [NOT_IMPLEMENTED_REASON] : result.fileMessages,
       },
     },
     201
@@ -266,70 +268,82 @@ app.get('/:id', async (c) => {
 });
 
 /**
- * POST /api/admin/imports/:id/validate - run validation. Writes no production data.
+ * POST /api/admin/imports/:id/validate - report this batch's validation outcome.
+ *
+ * Validation itself runs during the upload, because that is the only request
+ * that holds the workbook. This endpoint reports what it produced, which keeps
+ * the five stages separately addressable and keeps the client's upload ->
+ * validate -> preview sequence working unchanged.
+ *
+ * It is deliberately a READ. It writes nothing and logs nothing: the state
+ * change and its audit entry already happened at upload, and a second VALIDATE
+ * audit row for a request that changed nothing would be a lie in the record.
+ * Calling it repeatedly is therefore safe and always returns the same answer.
+ *
+ * A batch still `pending` has no outcome to report - that can only happen if
+ * validation never ran - and the honest remedy is to upload the workbook again,
+ * because nothing kept the bytes.
  */
 app.post('/:id/validate', async (c) => {
   const db = c.env.DB;
-  const actorId = c.get('session')!.employee_id;
   const id = Number.parseInt(c.req.param('id')!, 10);
 
   if (Number.isNaN(id)) {
     return c.json({ success: false, error: 'Invalid import id' }, 400);
   }
 
-  const existing = await getImportBatch(db, id);
-  if (!existing) {
+  const batch = await getImportBatch(db, id);
+  if (!batch) {
     return c.json({ success: false, error: 'Import not found' }, 404);
   }
 
-  const bucket = c.env.IMPORTS;
-
-  const result = await validateImport(db, id, async () => {
-    if (!bucket || !existing.r2_object_key) return null;
-    const object = await bucket.get(existing.r2_object_key);
-    return object ? await object.arrayBuffer() : null;
-  });
-
-  if (result.kind === 'conflict') {
-    return c.json({ success: false, error: result.reason }, 409);
+  if (batch.status === 'committed' || batch.status === 'committing') {
+    return c.json({ success: false, error: 'This import has already been committed.' }, 409);
   }
 
-  await logImportChange(
-    db,
-    actorId,
-    id,
-    'VALIDATE',
-    {
-      importType: existing.import_type,
-      status: result.batch.status,
-      totalRows: result.batch.total_rows,
-      invalidRows: result.batch.invalid_rows,
-      reason: result.batch.failure_reason ?? undefined,
-    },
-    clientIp(c)
-  );
-
-  if (result.kind === 'not_implemented') {
-    // 200: the request was handled correctly. The honest answer is that this
-    // import type has no parser yet, which the payload states explicitly.
-    return c.json({
-      success: true,
-      data: {
-        ...toBatchResponse(result.batch as unknown as Record<string, unknown>),
-        importer_available: false,
-        outcome: 'not_implemented',
-        messages: [NOT_IMPLEMENTED_REASON],
+  if (batch.status === 'pending' || batch.status === 'validating') {
+    return c.json(
+      {
+        success: false,
+        error:
+          'This import has no validation result. Upload the workbook again - the file is not stored after the upload that carried it.',
       },
-    });
+      409
+    );
   }
+
+  // `validation_summary` is written by the same call that set the status, so
+  // the two cannot disagree.
+  let fileMessages: string[] = [];
+  let implemented = true;
+  if (batch.validation_summary) {
+    try {
+      const summary = JSON.parse(batch.validation_summary) as {
+        fileMessages?: string[];
+        implemented?: boolean;
+      };
+      fileMessages = summary.fileMessages ?? [];
+      implemented = summary.implemented !== false;
+    } catch {
+      // A summary we cannot parse is not worth failing the request over; the
+      // status and counts on the row are the authoritative result.
+      fileMessages = [];
+    }
+  }
+
+  const outcome = !implemented
+    ? 'not_implemented'
+    : batch.status === 'preview'
+      ? 'ready'
+      : 'failed';
 
   return c.json({
     success: true,
     data: {
-      ...toBatchResponse(result.batch as unknown as Record<string, unknown>),
-      importer_available: true,
-      outcome: result.kind,
-      messages: result.fileMessages,
+      ...toBatchResponse(batch as unknown as Record<string, unknown>),
+      importer_available: implemented,
+      outcome,
+      messages: fileMessages,
     },
   });
 });

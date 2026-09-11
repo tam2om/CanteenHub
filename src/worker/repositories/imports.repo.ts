@@ -28,6 +28,10 @@ export interface ImportBatch {
   original_filename: string;
   file_size_bytes: number | null;
   content_sha256: string | null;
+  // Dormant. CanteenHub has no object store; this column is always NULL on rows
+  // created since that was removed, and is kept only so old rows written when
+  // an R2 bucket existed still read back. It is never written and never
+  // returned by the API - see toBatchResponse in routes/imports.ts.
   r2_object_key: string | null;
   uploaded_by: number;
   committed_by: number | null;
@@ -60,12 +64,12 @@ export interface StagedRowInput {
 }
 
 /**
- * Create the batch row BEFORE the file is stored.
+ * Open an import batch.
  *
- * Order matters: the batch id is what the deterministic object key is derived
- * from, and a batch with no object yet is a recoverable state that an
- * administrator can see and retry. The reverse order would leave an orphaned R2
- * object that nothing in the database points at.
+ * The row is created before validation runs so that the batch id exists to
+ * stage rows against, and so a workbook that fails to parse still leaves a
+ * visible `validation_failed` batch with its filename, size and hash rather
+ * than vanishing. Nothing stores the file itself.
  */
 export async function createImportBatch(
   db: D1Database,
@@ -106,18 +110,6 @@ export async function getImportBatch(db: D1Database, id: number): Promise<Import
     .first<ImportBatch>();
 
   return result || null;
-}
-
-/** Record the archived object's key once the upload to R2 has actually succeeded. */
-export async function attachObjectKey(
-  db: D1Database,
-  id: number,
-  objectKey: string
-): Promise<void> {
-  await db
-    .prepare('UPDATE import_batches SET r2_object_key = ? WHERE id = ?')
-    .bind(objectKey, id)
-    .run();
 }
 
 /**

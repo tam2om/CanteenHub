@@ -34,7 +34,6 @@ Employees whose roster type is "Amman HQ" do not receive company meals. They can
 - **Frontend**: React + TypeScript + Vite
 - **Backend**: Cloudflare Workers (Hono framework)
 - **Database**: Cloudflare D1 (SQLite)
-- **Storage**: Cloudflare R2 (for Excel imports)
 - **Hosting**: Cloudflare Pages/Workers
 
 ## Project Structure

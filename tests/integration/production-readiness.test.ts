@@ -14,7 +14,6 @@ import path from 'node:path';
 import type { Env } from '../../src/worker/types/env.js';
 import app from '../../src/worker/index.js';
 import { createTestDb, type TestD1Database } from '../helpers/d1.js';
-import { createTestR2 } from '../helpers/r2.js';
 import { testEnv, seedEmployee, setEmployeePasswordDirect, countRows, readJson, ROLE_ADMIN, type SeededEmployee } from '../helpers/fixtures.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -42,9 +41,18 @@ describe('Wrangler configuration', () => {
     expect(prod).toMatch(/binding\s*=\s*"DB"/);
   });
 
-  it('declares an R2 binding for production', () => {
-    expect(prod).toContain('[[env.production.r2_buckets]]');
-    expect(prod).toMatch(/binding\s*=\s*"IMPORTS"/);
+  it('declares NO object-store binding, in either environment', () => {
+    // CanteenHub must deploy on Cloudflare's free tier with no R2 subscription.
+    // An import is validated in the request that uploads it, so there is no
+    // bucket to bind - and a stale binding here would be a deployment asking
+    // for a service the account does not have.
+    expect(wrangler).not.toContain('r2_buckets');
+    expect(wrangler).not.toMatch(/binding\s*=\s*"IMPORTS"/);
+  });
+
+  it('binds only D1 and the built assets', () => {
+    const bindings = [...wrangler.matchAll(/binding\s*=\s*"([A-Z_]+)"/g)].map((m) => m[1]);
+    expect(new Set(bindings)).toEqual(new Set(['DB', 'ASSETS']));
   });
 
   it('declares BOTH production vars the Worker reads', () => {
@@ -100,7 +108,7 @@ describe('Scheduled maintenance', () => {
 
   beforeEach(async () => {
     db = createTestDb();
-    env = testEnv(db, createTestR2());
+    env = testEnv(db);
     admin = await seedEmployee(db, { amcoId: 'TEST900', roleId: ROLE_ADMIN });
   });
 
@@ -197,7 +205,7 @@ describe('Production error behaviour', () => {
   });
 
   it('a production error response exposes no internal detail', async () => {
-    const prodEnv = { ...testEnv(db, createTestR2()), ENVIRONMENT: 'production' as const };
+    const prodEnv = { ...testEnv(db), ENVIRONMENT: 'production' as const };
     // An unroutable path is the safest way to exercise the handler chain.
     const res = await app.request(`${BASE}/api/definitely-not-a-route`, {}, prodEnv);
     const body = await readJson(res);
@@ -209,7 +217,7 @@ describe('Production error behaviour', () => {
 
   it('malformed JSON is refused without leaking a parser trace', async () => {
     const admin = await seedEmployee(db, { amcoId: 'TEST900', roleId: ROLE_ADMIN });
-    const prodEnv = { ...testEnv(db, createTestR2()), ENVIRONMENT: 'production' as const };
+    const prodEnv = { ...testEnv(db), ENVIRONMENT: 'production' as const };
 
     const res = await app.request(
       `${BASE}/api/menu`,
@@ -228,7 +236,7 @@ describe('Production error behaviour', () => {
   });
 
   it('an unauthenticated request is refused before reaching any data', async () => {
-    const prodEnv = { ...testEnv(db, createTestR2()), ENVIRONMENT: 'production' as const };
+    const prodEnv = { ...testEnv(db), ENVIRONMENT: 'production' as const };
     for (const path of ['/api/admin/employees', '/api/admin/reports/lunch', '/api/roster/admin/day', '/api/me/today']) {
       const res = await app.request(`${BASE}${path}`, {}, prodEnv);
       expect(res.status).toBe(401);
@@ -239,7 +247,7 @@ describe('Production error behaviour', () => {
 describe('Session cookie hardening', () => {
   it('is HttpOnly, Secure, SameSite=Strict and scoped to the site root', async () => {
     const db = createTestDb();
-    const env = testEnv(db, createTestR2());
+    const env = testEnv(db);
     const employee = await seedEmployee(db, { amcoId: 'TEST100' });
     await setEmployeePasswordDirect(db, employee.id, 'original-password-here');
     const res = await app.request(

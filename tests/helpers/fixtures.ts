@@ -21,12 +21,11 @@ export interface SeededEmployee {
   cookie: string;
 }
 
-export function testEnv(db: D1Database, bucket?: unknown): Env {
+export function testEnv(db: D1Database): Env {
+  // D1 is the only binding the application needs. There is no object store:
+  // uploaded workbooks are validated in the request that carries them.
   return {
     DB: db,
-    // Present only when a test supplies one, so the "storage not configured"
-    // path stays reachable.
-    ...(bucket === undefined ? {} : { IMPORTS: bucket }),
     ENVIRONMENT: 'local',
     FRONTEND_URL: 'http://localhost:5173',
   } as unknown as Env;

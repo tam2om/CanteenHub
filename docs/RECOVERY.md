@@ -13,7 +13,7 @@ them.
 | Store | Backup mechanism | Verified here? |
 |---|---|---|
 | **D1** | Cloudflare **Time Travel** — point-in-time restore within the retention window of the account's plan | ❌ documented only |
-| **R2** (import archive) | **None by default.** Objects persist until deleted; there is no snapshot | ❌ |
+| **Uploaded workbooks** | **Not stored at all.** A workbook is parsed in the request that uploads it and then dropped — there is nothing to back up, and nothing to lose | ✅ n/a |
 | **Worker code** | Git, plus Cloudflare deployment history | ✅ |
 | **Configuration** | `wrangler.toml` in Git; placeholders only | ✅ |
 
@@ -65,20 +65,20 @@ npx wrangler d1 time-travel info canteenhub-prod --env production
 npx wrangler d1 time-travel restore canteenhub-prod --env production --timestamp <ISO_TIMESTAMP>
 ```
 
-### The consequence nobody expects: D1 and R2 restore independently
+### D1 is the only store, which makes restore simpler than it used to be
 
-R2 is **not** rolled back with D1. Restoring D1 to a point before an import was
-committed leaves the workbook still in R2, and the `import_batches` row that
-referenced it gone. The object is then orphaned — harmless, but it will never be
-cleaned up automatically.
+CanteenHub once kept uploaded workbooks in R2, and that split was the trap in
+this document: R2 was **not** rolled back with D1, so a restore left orphaned
+objects behind, and a deleted object left D1 pointing at nothing.
 
-The reverse is worse: if an R2 object is deleted while D1 still references it,
-`file_archived` reports `true` and the download fails at read time. The
-application handles this as an error rather than a crash, but the source
-workbook is gone.
+Neither can happen now. There is no second store. Restoring D1 restores the
+whole application: employees, roster, menus, selections, history, holidays,
+audit, and every import batch with its staged rows.
 
-**Practical rule:** treat R2 as append-only. Do not delete import objects as
-routine housekeeping.
+**What a restore still cannot give you back is an uploaded file**, because none
+was ever kept. If a restore rolls an import back and you want it again, upload
+the workbook again. `original_filename`, `file_size_bytes` and `content_sha256`
+on the surviving batch row tell you exactly which file that was.
 
 ---
 
@@ -120,7 +120,7 @@ administrators racing the same commit produce exactly one winner; the loser gets
 |---|---|---|---|
 | Dies during **validation** | stuck `validating` | none written — validation never writes | Re-upload. See §4.1 to release the stuck row |
 | Dies during **commit, before the batch** | stuck `committing` | none written | §4.1 |
-| **R2 put fails** on upload | `validation_failed`, `file_archived = false` | none | Re-upload; nothing to clean up |
+| **Worker dies mid-upload** | no batch, or a batch left `pending` | none | Re-upload. The bytes were never stored, so there is nothing half-written to clean up |
 | **D1 batch fails** mid-commit | `commit_failed` | **none** — the batch is transactional, all or nothing | Fix the workbook, re-upload |
 | **Batch succeeds, status transition fails** | stuck `committing` | **applied** | §4.2 — the one genuinely partial state |
 
@@ -203,8 +203,11 @@ only place it is visible — which is the reason to look before deleting.
 
 ## 5. What cannot be recovered
 
-- **A deleted R2 object.** The source workbook is gone; the import's staged rows
-  and audit record remain.
+- **Any uploaded workbook.** Files are never stored, so none can be retrieved —
+  from a backup, a restore, or anywhere else. The import's staged rows, counts,
+  filename, size, SHA-256 and audit record all remain; the bytes do not.
+- **Re-validating an existing batch.** Validation runs against the file, and the
+  file is gone. Re-validating means uploading again, which opens a new batch.
 - **Writes made after the Time Travel timestamp** you restore to.
 - **Anything at all if the Cloudflare account is lost.** The `d1 export` in §1 is
   the only defence, and only if it is stored elsewhere.

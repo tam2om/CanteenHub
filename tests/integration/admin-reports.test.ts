@@ -12,7 +12,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import app from '../../src/worker/index.js';
 import { createTestDb, type TestD1Database } from '../helpers/d1.js';
-import { createTestR2 } from '../helpers/r2.js';
 import {
   testEnv,
   seedEmployee,
@@ -41,7 +40,7 @@ describe('Admin lunch report', () => {
 
   beforeEach(async () => {
     db = createTestDb();
-    env = testEnv(db, createTestR2());
+    env = testEnv(db);
     admin = await seedEmployee(db, { amcoId: 'TEST900', roleId: ROLE_ADMIN, rosterType: 'amman_hq' });
     superAdmin = await seedEmployee(db, { amcoId: 'TEST901', roleId: ROLE_SUPER_ADMIN, rosterType: 'amman_hq' });
     employee = await seedEmployee(db, { amcoId: 'TEST100', rosterType: 'regular' });

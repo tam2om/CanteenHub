@@ -12,15 +12,15 @@ contains credentials, and nothing you paste here should be committed.
 ## Pre-deployment
 
 **Configuration**
-- [ ] `wrangler.toml` `[env.production]` has `d1_databases`, `r2_buckets` and
-      `vars` — Wrangler does **not** inherit these into a named environment
+- [ ] `wrangler.toml` `[env.production]` has `d1_databases` and `vars` —
+      Wrangler does **not** inherit these into a named environment
 - [ ] `FRONTEND_URL` is the real production origin (it is the CORS allow-list in
       production; an empty value allows nothing)
 - [ ] `database_id` is the real id, not `REPLACE_WITH_PRODUCTION_D1_DATABASE_ID`
 - [ ] Both `[assets]` blocks name `binding = "ASSETS"` — without it every deep
       link 404s, because the Worker serves `index.html` itself
-- [ ] `npx wrangler deploy --env production --dry-run` lists DB, IMPORTS,
-      ASSETS, ENVIRONMENT and FRONTEND_URL
+- [ ] `npx wrangler deploy --env production --dry-run` lists DB, ASSETS,
+      ENVIRONMENT and FRONTEND_URL — and **no** object-store binding
 
 **Secrets**
 - [ ] No token, key or account id is committed anywhere — `git grep` the branch
@@ -32,9 +32,10 @@ contains credentials, and nothing you paste here should be committed.
 - [ ] A pre-deployment export taken and stored **outside** this account:
       `wrangler d1 export <db> --env production --remote --output ./backup-$(date +%F).sql`
 
-**R2**
-- [ ] Bucket created and named in `wrangler.toml`
-- [ ] The Worker can write to it (an upload archives, `file_archived` is true)
+**Object storage**
+- [ ] Nothing to do. CanteenHub uses no bucket: a workbook is parsed in the
+      request that uploads it and is never stored. If `wrangler.toml` mentions
+      `r2_buckets` at all, that is a leftover — remove it
 
 **Migrations**
 - [ ] `npm run db:migrate:prod` applied
@@ -74,8 +75,9 @@ Run `SMOKE-TESTS.md` in full. At minimum:
 - [ ] **Roster** — day view, a manual correction takes effect on eligibility
 - [ ] **Reports** — the day's counts match what employees actually chose
 - [ ] **Imports** — upload → validate → preview → commit for employees and
-      roster; a second commit of the same batch is refused; the source file is
-      archived in R2
+      roster; a second commit of the same batch is refused. The response carries
+      `original_filename`, `file_size_bytes` and `content_sha256` and **no**
+      `file_archived` flag: the workbook itself is not kept
 
 ---
 
@@ -86,8 +88,9 @@ Run `SMOKE-TESTS.md` in full. At minimum:
 - [ ] **Time Travel** — ⚠️ **UNVERIFIED in this repository.** Rehearse
       `wrangler d1 time-travel info` and `restore` on a throwaway database
       **before** you need it, and confirm the retention window your plan gives
-- [ ] **R2 archive** — D1 and R2 restore independently; a Time Travel restore
-      orphans import objects, and a deleted object is gone for good
+- [ ] **Single store** — D1 is the only thing to recover. There is no object
+      store to fall out of step with it, and no uploaded workbook to lose,
+      because none is kept. Re-running an import means re-uploading the file
 - [ ] **Stuck import** — you have read `RECOVERY.md` §4.1 and §4.2 and know the
       difference between "wrote nothing" and "applied but not recorded"
 - [ ] **Login lockout** — you know the key is `<IP>:<AMCO ID>`, not the AMCO ID

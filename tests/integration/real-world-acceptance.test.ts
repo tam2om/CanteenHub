@@ -14,12 +14,12 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import app from '../../src/worker/index.js';
 import { createTestDb, type TestD1Database } from '../helpers/d1.js';
-import { createTestR2, type TestR2Bucket } from '../helpers/r2.js';
 import { buildMenuWorkbook, menuRow } from '../helpers/xlsxFixture.js';
 import {
   testEnv,
   seedEmployee,
   setEmployeePasswordDirect,
+  countRows,
   readJson,
   ROLE_ADMIN,
   type SeededEmployee,
@@ -37,7 +37,7 @@ describe('Session middleware reaches the /api/auth router', () => {
 
   beforeEach(async () => {
     db = createTestDb();
-    env = testEnv(db, createTestR2());
+    env = testEnv(db);
     employee = await seedEmployee(db, { amcoId: 'TEST700' });
     await setEmployeePasswordDirect(db, employee.id, PASSWORD);
   });
@@ -144,14 +144,12 @@ describe('Session middleware reaches the /api/auth router', () => {
 
 describe('Import validation survives a workbook of real size', () => {
   let db: TestD1Database;
-  let bucket: TestR2Bucket;
   let env: ReturnType<typeof testEnv>;
   let admin: SeededEmployee;
 
   beforeEach(async () => {
     db = createTestDb();
-    bucket = createTestR2();
-    env = testEnv(db, bucket);
+    env = testEnv(db);
     admin = await seedEmployee(db, { amcoId: 'TEST900', roleId: ROLE_ADMIN });
   });
 
@@ -284,7 +282,7 @@ describe('Login rate limiting', () => {
 
   beforeEach(async () => {
     db = createTestDb();
-    env = testEnv(db, createTestR2());
+    env = testEnv(db);
     const employee = await seedEmployee(db, { amcoId: 'TEST600' });
     await setEmployeePasswordDirect(db, employee.id, PASSWORD);
   });
@@ -369,5 +367,195 @@ describe('Login rate limiting', () => {
     for (let attempt = 0; attempt < 8; attempt += 1) {
       expect((await login(PASSWORD)).status).toBe(200);
     }
+  });
+});
+
+/**
+ * The import workflow with no object store.
+ *
+ * CanteenHub must run on Cloudflare's free tier without an R2 subscription, so
+ * the uploaded workbook is validated in the request that carries it and is then
+ * gone. These tests pin the contract that replaced the archive: the five stages
+ * still work, the staged rows still carry the commit, and nothing anywhere
+ * holds the bytes.
+ */
+describe('Imports without an object store', () => {
+  let db: TestD1Database;
+  let env: ReturnType<typeof testEnv>;
+  let admin: SeededEmployee;
+  let employee: SeededEmployee;
+
+  const IMPORTS = `${BASE}/api/admin/imports`;
+
+  const GOOD = () =>
+    buildMenuWorkbook([
+      menuRow('2027-07-01', 'Main One A', 'Main One B', { salad: 'Salad' }),
+      menuRow('2027-07-02', 'Main Two A', 'Main Two B', {}),
+    ]);
+
+  /** Two options that are identical, which the menu importer refuses. */
+  const BAD = () => buildMenuWorkbook([menuRow('2027-07-03', 'Same Dish', 'Same Dish', {})]);
+
+  beforeEach(async () => {
+    db = createTestDb();
+    env = testEnv(db);
+    admin = await seedEmployee(db, { amcoId: 'TEST900', roleId: ROLE_ADMIN });
+    employee = await seedEmployee(db, { amcoId: 'TEST001' });
+  });
+
+  const upload = (bytes: Uint8Array, cookie = admin.cookie) => {
+    const form = new FormData();
+    form.set('import_type', 'menu');
+    form.set('file', new File([bytes as unknown as BlobPart], 'menu.xlsx'));
+    const headers: Record<string, string> = {};
+    if (cookie) headers.Cookie = cookie;
+    return app.request(IMPORTS, { method: 'POST', headers, body: form }, env);
+  };
+  const validate = (id: number, cookie = admin.cookie) =>
+    app.request(`${IMPORTS}/${id}/validate`, { method: 'POST', headers: { Cookie: cookie } }, env);
+  const commit = (id: number, cookie = admin.cookie) =>
+    app.request(`${IMPORTS}/${id}/commit`, { method: 'POST', headers: { Cookie: cookie } }, env);
+  const detail = (id: number) => app.request(`${IMPORTS}/${id}`, { headers: { Cookie: admin.cookie } }, env);
+
+  it('runs the whole workflow with only a D1 binding', async () => {
+    // The env deliberately carries no storage binding of any kind.
+    expect((env as unknown as Record<string, unknown>).IMPORTS).toBeUndefined();
+
+    const uploaded = await upload(GOOD());
+    expect(uploaded.status).toBe(201);
+    const batch = (await readJson<{ data: { id: number; status: string; outcome: string } }>(uploaded)).data;
+    expect(batch.status).toBe('preview');
+    expect(batch.outcome).toBe('ready');
+
+    expect((await validate(batch.id)).status).toBe(200);
+
+    const preview = (await readJson<{ data: { preview_rows: unknown[] } }>(await detail(batch.id))).data;
+    expect(preview.preview_rows).toHaveLength(2);
+
+    expect((await commit(batch.id)).status).toBe(200);
+
+    const days = await db.prepare('SELECT COUNT(*) AS n FROM menu_days').first<{ n: number }>();
+    expect(days?.n).toBe(2);
+  });
+
+  it('parses the real XLSX bytes rather than trusting the request', async () => {
+    // The workbook is genuinely read: two distinct dates and four option names
+    // come out of the ZIP, not out of the form fields.
+    const { id } = (await readJson<{ data: { id: number } }>(await upload(GOOD()))).data;
+    await commit(id);
+
+    const dates = await db
+      .prepare('SELECT meal_date FROM menu_days ORDER BY meal_date')
+      .all<{ meal_date: string }>();
+    expect(dates.results.map((r) => r.meal_date)).toEqual(['2027-07-01', '2027-07-02']);
+
+    const options = await db.prepare('SELECT COUNT(*) AS n FROM menu_options').first<{ n: number }>();
+    expect(options?.n).toBe(4);
+  });
+
+  it('records a validation failure instead of accepting it', async () => {
+    const res = await upload(BAD());
+    expect(res.status).toBe(201);
+
+    const batch = (await readJson<{ data: { id: number; status: string; outcome: string; messages: string[] } }>(res))
+      .data;
+    expect(batch.status).toBe('validation_failed');
+    expect(batch.outcome).toBe('failed');
+
+    // The reason survives in D1 even though the file does not.
+    const row = await db
+      .prepare('SELECT failure_reason, invalid_rows FROM import_batches WHERE id = ?')
+      .bind(batch.id)
+      .first<{ failure_reason: string; invalid_rows: number }>();
+    expect(row?.invalid_rows).toBe(1);
+    expect(row?.failure_reason).toBeTruthy();
+
+    expect((await commit(batch.id)).status).toBe(409);
+    const days = await db.prepare('SELECT COUNT(*) AS n FROM menu_days').first<{ n: number }>();
+    expect(days?.n).toBe(0);
+  });
+
+  it('keeps the preview available for commit long after the bytes are gone', async () => {
+    const { id } = (await readJson<{ data: { id: number } }>(await upload(GOOD()))).data;
+
+    // Nothing holds the file; everything the commit needs is staged.
+    const staged = await db
+      .prepare('SELECT COUNT(*) AS n FROM import_batch_rows WHERE import_batch_id = ?')
+      .bind(id)
+      .first<{ n: number }>();
+    expect(staged?.n).toBe(2);
+
+    expect((await commit(id)).status).toBe(200);
+  });
+
+  it('answers validate identically however many times it is called', async () => {
+    const { id } = (await readJson<{ data: { id: number } }>(await upload(GOOD()))).data;
+
+    const first = await readJson(await validate(id));
+    const second = await readJson(await validate(id));
+    const third = await readJson(await validate(id));
+    expect(second).toEqual(first);
+    expect(third).toEqual(first);
+
+    // It is a read: it stages nothing extra and writes no second audit row.
+    const staged = await db
+      .prepare('SELECT COUNT(*) AS n FROM import_batch_rows WHERE import_batch_id = ?')
+      .bind(id)
+      .first<{ n: number }>();
+    expect(staged?.n).toBe(2);
+
+    const audits = await db
+      .prepare("SELECT COUNT(*) AS n FROM audit_log WHERE entity_id = ? AND action = 'VALIDATE_IMPORT'")
+      .bind(id)
+      .first<{ n: number }>();
+    expect(audits?.n).toBe(1);
+  });
+
+  it('still refuses a second commit', async () => {
+    const { id } = (await readJson<{ data: { id: number } }>(await upload(GOOD()))).data;
+    expect((await commit(id)).status).toBe(200);
+    expect((await commit(id)).status).toBe(409);
+
+    const days = await db.prepare('SELECT COUNT(*) AS n FROM menu_days').first<{ n: number }>();
+    expect(days?.n).toBe(2);
+  });
+
+  it('stores nothing that could be the workbook', async () => {
+    const bytes = GOOD();
+    const { id } = (await readJson<{ data: { id: number } }>(await upload(bytes))).data;
+
+    const row = await db
+      .prepare('SELECT * FROM import_batches WHERE id = ?')
+      .bind(id)
+      .first<Record<string, unknown>>();
+
+    expect(row!.r2_object_key).toBeNull();
+    for (const value of Object.values(row!)) {
+      expect(value).not.toBeInstanceOf(ArrayBuffer);
+      expect(value).not.toBeInstanceOf(Uint8Array);
+    }
+
+    // No column in the whole import subtree is anywhere near the file's size.
+    const staged = await db
+      .prepare('SELECT preview_json, messages FROM import_batch_rows WHERE import_batch_id = ?')
+      .bind(id)
+      .all<{ preview_json: string | null; messages: string | null }>();
+    const stagedBytes = staged.results.reduce(
+      (total, r) => total + (r.preview_json?.length ?? 0) + (r.messages?.length ?? 0),
+      0
+    );
+    expect(stagedBytes).toBeLessThan(bytes.length);
+  });
+
+  it('still enforces admin-only access with no storage in the picture', async () => {
+    expect((await upload(GOOD(), employee.cookie)).status).toBe(403);
+    expect(await countRows(db, 'SELECT COUNT(*) as n FROM import_batches')).toBe(0);
+
+    const { id } = (await readJson<{ data: { id: number } }>(await upload(GOOD()))).data;
+    expect((await validate(id, employee.cookie)).status).toBe(403);
+    expect((await commit(id, employee.cookie)).status).toBe(403);
+
+    const days = await db.prepare('SELECT COUNT(*) AS n FROM menu_days').first<{ n: number }>();
+    expect(days?.n).toBe(0);
   });
 });
