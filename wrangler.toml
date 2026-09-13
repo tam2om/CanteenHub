@@ -60,7 +60,7 @@ binding = "ASSETS"
 [[env.production.d1_databases]]
 binding = "DB"
 database_name = "canteenhub-prod"
-database_id = "REPLACE_WITH_PRODUCTION_D1_DATABASE_ID"
+database_id = "9c8f5ee4-2620-4822-b5df-5521c130df52"
 migrations_dir = "migrations"
 
 [env.production.vars]
@@ -68,7 +68,7 @@ ENVIRONMENT = "production"
 # The origin the browser loads the app from. When the Worker serves the SPA
 # itself this is the Worker's own hostname, and CORS is effectively unused
 # because every request is same-origin.
-FRONTEND_URL = "https://REPLACE_WITH_PRODUCTION_HOSTNAME"
+FRONTEND_URL = "https://canteenhub-prod.tamer-haj.workers.dev"
 
 [env.production.triggers]
 crons = ["17 3 * * *"]

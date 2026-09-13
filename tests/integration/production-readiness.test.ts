@@ -27,8 +27,12 @@ const BASE = 'http://localhost';
 
 /** The body of a named wrangler environment section, to the next [env.*] or EOF. */
 function productionSection(): string {
-  const start = wrangler.indexOf('[env.production]');
-  return start === -1 ? '' : wrangler.slice(start);
+  // Anchored to the start of a line. A plain indexOf matched the COMMENT near
+  // the top of the file that mentions [env.production], so this "section"
+  // silently included the entire local configuration - which is how a
+  // production assertion could be satisfied by a local value.
+  const match = /^\[env\.production\]$/m.exec(wrangler);
+  return match ? wrangler.slice(match.index) : '';
 }
 
 describe('Wrangler configuration', () => {
@@ -82,11 +86,41 @@ describe('Wrangler configuration', () => {
     expect(prodAssets).toMatch(/binding\s*=\s*"ASSETS"/);
   });
 
-  it('contains NO real credentials - only marked placeholders', () => {
-    // A 32-hex-character run is what a real D1 database id looks like.
-    expect(wrangler).not.toMatch(/database_id\s*=\s*"[0-9a-f]{32}"/i);
-    expect(wrangler).toMatch(/database_id\s*=\s*"REPLACE_WITH_/);
-    expect(wrangler).not.toMatch(/api[_-]?token|account_id\s*=\s*"[0-9a-f]{32}"|secret\s*=/i);
+  it('contains NO credentials or secrets', () => {
+    // This used to also require `database_id` to still read "REPLACE_WITH_".
+    // That was a PRE-DEPLOYMENT guard, and it stopped being true the moment
+    // production was created on 2026-09-13: the field now holds the real id.
+    //
+    // Removing that clause is not a weakened assertion, because a D1 database
+    // id was never the thing worth guarding. It is an account-scoped
+    // identifier, useless without account credentials - DEPLOYMENT.md says so
+    // in as many words - and it MUST be committed, or nothing can deploy.
+    // What must never appear is an actual credential, which is what the rest
+    // of this test checks, now more strictly than before.
+    expect(wrangler).not.toMatch(/api[_-]?token/i);
+    expect(wrangler).not.toMatch(/\bsecret\s*=/i);
+    expect(wrangler).not.toMatch(/\baccount_id\s*=/i);
+    // A Cloudflare API token is 40 URL-safe characters; a D1 id is a UUID.
+    // Reject anything token-shaped in quotes that is not a UUID.
+    const quoted = [...wrangler.matchAll(/"([A-Za-z0-9_-]{32,})"/g)].map((m) => m[1]);
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    expect(quoted.filter((v) => !uuid.test(v))).toEqual([]);
+  });
+
+  it('pins the production database to a real, non-placeholder id', () => {
+    // The inverse guard: a deployed repository must NOT ship a placeholder,
+    // because `wrangler deploy --env production` would then target nothing.
+    const prodDb = prod.match(/database_id\s*=\s*"([^"]+)"/);
+    expect(prodDb, 'production must declare a database_id').not.toBeNull();
+    expect(prodDb![1]).not.toMatch(/REPLACE_WITH/);
+    expect(prodDb![1]).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    );
+  });
+
+  it('points production at a real hostname, not a placeholder', () => {
+    expect(prod).not.toMatch(/FRONTEND_URL\s*=\s*"[^"]*REPLACE_WITH/);
+    expect(prod).toMatch(/FRONTEND_URL\s*=\s*"https:\/\//);
   });
 
   it('the production deploy script targets the production environment', () => {

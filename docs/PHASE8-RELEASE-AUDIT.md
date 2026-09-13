@@ -12,7 +12,15 @@ could not be run, it says so and says why.
 > R2 binding in §10, and "R2-archived" in the release matrix — describes the
 > system as it was at `f615234`. See `ARCHITECTURE.md` §0.0. Nothing else in
 > this audit changed: the same 23 consistency checks, the same security
-> findings, and the same outstanding Cloudflare items still stand.
+> findings still stand.
+>
+> **Also superseded: §10's Cloudflare table.** On 2026-09-13 a temporary
+> Cloudflare validation run turned most of those UNVALIDATED rows into evidence
+> — a real deployment, real D1 migrations, real static assets, real SPA deep
+> links, real cron registration and a real **D1 Time Travel restore**, all on
+> throwaway `canteenhub-validation` resources since deleted. See
+> `CLOUDFLARE-VALIDATION.md`. **Production itself remains unvalidated**: no
+> `canteenhub-prod` Worker or database has ever been created.
 
 ---
 

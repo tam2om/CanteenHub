@@ -85,9 +85,10 @@ Run `SMOKE-TESTS.md` in full. At minimum:
 
 - [ ] **D1 backup** — a manual export is taken and stored off-account, and you
       have restored one into a throwaway database at least once
-- [ ] **Time Travel** — ⚠️ **UNVERIFIED in this repository.** Rehearse
-      `wrangler d1 time-travel info` and `restore` on a throwaway database
-      **before** you need it, and confirm the retention window your plan gives
+- [ ] **Time Travel** — ✅ rehearsed 2026-09-13 on a throwaway Cloudflare D1:
+      damage, `restore --bookmark`, exact recovery, app verified against the
+      restored database (`CLOUDFLARE-VALIDATION.md`). Confirm the retention
+      window **your** plan gives, and rehearse once on the real database
 - [ ] **Single store** — D1 is the only thing to recover. There is no object
       store to fall out of step with it, and no uploaded workbook to lose,
       because none is kept. Re-running an import means re-uploading the file

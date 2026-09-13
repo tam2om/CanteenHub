@@ -12,7 +12,7 @@ them.
 
 | Store | Backup mechanism | Verified here? |
 |---|---|---|
-| **D1** | Cloudflare **Time Travel** — point-in-time restore within the retention window of the account's plan | ❌ documented only |
+| **D1** | Cloudflare **Time Travel** — point-in-time restore within the retention window of the account's plan | ✅ rehearsed on a throwaway D1, 2026-09-13 (not on production) |
 | **Uploaded workbooks** | **Not stored at all.** A workbook is parsed in the request that uploads it and then dropped — there is nothing to back up, and nothing to lose | ✅ n/a |
 | **Worker code** | Git, plus Cloudflare deployment history | ✅ |
 | **Configuration** | `wrangler.toml` in Git; placeholders only | ✅ |
@@ -51,10 +51,14 @@ the export, confirm the application serves the restored data):
 | Manual export → total loss → restore → application reads the restored data | ✅ |
 | §4.1 releasing a stuck batch, including the compare-and-swap no-op on re-run | ✅ |
 | §4.2 marking an applied-but-uncommitted batch committed, and the API's refusal to double-commit | ✅ |
-| §2 Time Travel `info` / `restore` | ❌ — needs a real Cloudflare account; never rehearsed |
+| §2 Time Travel `info` / `restore` | ✅ — rehearsed 2026-09-13 on a throwaway Cloudflare D1 (`canteenhub-validation`). Damage, restore, exact recovery, app verified against the restored database. See `CLOUDFLARE-VALIDATION.md` |
 
-Time Travel therefore remains an **unverified** mechanism in this repository.
-Rehearse it on a throwaway database before relying on it.
+Time Travel is **verified on a throwaway database** as of 2026-09-13: a
+controlled deletion was restored exactly from a bookmark, the schema and
+migration ledger survived, and the application worked against the restored
+data. It has **not** been exercised against a production database, because none
+exists yet. Rehearse it again on the real database's first day if you want that
+certainty too.
 
 ---
 
