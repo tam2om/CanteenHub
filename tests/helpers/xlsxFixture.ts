@@ -100,6 +100,17 @@ export interface SheetSpec {
   name: string;
   /** Rows of cell values. `null` leaves the cell absent entirely. */
   rows: Array<Array<string | null>>;
+  /**
+   * Write `null` cells the way Excel actually does inside a merged region: as
+   * an empty but STYLED self-closing element, `<c r="D2" s="1"/>`, rather than
+   * omitting them.
+   *
+   * This is not a cosmetic difference. A self-closing cell followed by a
+   * populated one is precisely the shape that broke the reader on the real
+   * September workbook, and no fixture that omits blanks can reproduce it.
+   * An empty row becomes a self-closing `<row/>` for the same reason.
+   */
+  styledBlanks?: boolean;
 }
 
 /**
@@ -124,11 +135,12 @@ export function buildWorkbook(sheets: SheetSpec[]): Uint8Array {
         const rowNumber = rowIndex + 1;
         const cellsXml = cells
           .map((value, colIndex) => {
-            if (value === null) return '';
             const ref = `${colName(colIndex)}${rowNumber}`;
+            if (value === null) return sheet.styledBlanks ? `<c r="${ref}" s="1"/>` : '';
             return `<c r="${ref}" t="inlineStr"><is><t>${escapeXml(value)}</t></is></c>`;
           })
           .join('');
+        if (cellsXml === '' && sheet.styledBlanks) return `<row r="${rowNumber}" s="1"/>`;
         return `<row r="${rowNumber}">${cellsXml}</row>`;
       })
       .join('');
@@ -345,14 +357,18 @@ export function buildRealWorldMenuWorkbook(
     title = REAL_WORLD_TITLE_ROW,
     upper = REAL_WORLD_UPPER_HEADERS,
     lower = REAL_WORLD_LOWER_HEADERS,
+    styledBlanks = true,
   }: {
     sheetName?: string;
     title?: Array<string | null>;
     upper?: Array<string | null>;
     lower?: Array<string | null>;
+    styledBlanks?: boolean;
   } = {}
 ): Uint8Array {
-  return buildWorkbook([{ name: sheetName, rows: [title, upper, lower, ...rows] }]);
+  return buildWorkbook([
+    { name: sheetName, rows: [title, upper, lower, ...rows], styledBlanks },
+  ]);
 }
 
 /** The same sheet shape, for composing multi-sheet workbooks. */
@@ -366,5 +382,6 @@ export function realWorldSheet(
     rows: [title, REAL_WORLD_UPPER_HEADERS, REAL_WORLD_LOWER_HEADERS, ...rows] as Array<
       Array<string | null>
     >,
+    styledBlanks: true,
   };
 }

@@ -196,29 +196,67 @@ export interface Worksheet {
   rows: SheetRow[];
 }
 
+/**
+ * Walk every `<tag …>…</tag>` and `<tag … />` element at this level, yielding
+ * its attributes and its body.
+ *
+ * WHY NOT ONE REGULAR EXPRESSION: the obvious
+ * `/<c(?:\s([^>]*))?>([\s\S]*?)<\/c>|<c\s([^>]*)\/>/` reads correctly until a
+ * SELF-CLOSING element is followed by a normal one. `[^>]*` happily consumes
+ * the trailing slash of `<c r="D2" s="13"/>`, so the first branch matches, and
+ * its lazy body then runs on to the NEXT `</c>` - swallowing the following cell
+ * whole. The empty cell inherits that cell's `<v>`, and because the attributes
+ * came from the EMPTY cell there is no `t="s"` to resolve it, so a shared-string
+ * INDEX is emitted as the value and the real cell disappears.
+ *
+ * That is not hypothetical. It is what the real September menu workbook does:
+ * Excel writes empty-but-styled cells inside merged regions as `<c r="D2"
+ * s="13"/>`, and the header row came back as `Day | Date | Lunch Menu | "4"`
+ * with "Option 1" missing entirely. Scanning tag by tag removes the whole class
+ * of error rather than patching the pattern.
+ */
+function* scanElements(xml: string, tag: string): Generator<{ attrs: string; body: string }> {
+  const openRe = new RegExp(`<${tag}\\b([^>]*)>`, 'g');
+  const close = `</${tag}>`;
+  let match: RegExpExecArray | null;
+
+  while ((match = openRe.exec(xml)) !== null) {
+    const rawAttrs = match[1];
+
+    // `<c … />` - self-closing, so there is no body and nothing to search for.
+    if (rawAttrs.endsWith('/')) {
+      yield { attrs: rawAttrs.slice(0, -1), body: '' };
+      continue;
+    }
+
+    const bodyStart = match.index + match[0].length;
+    const bodyEnd = xml.indexOf(close, bodyStart);
+    if (bodyEnd === -1) {
+      // Unterminated element: take what is there rather than losing the rest.
+      yield { attrs: rawAttrs, body: xml.slice(bodyStart) };
+      return;
+    }
+
+    yield { attrs: rawAttrs, body: xml.slice(bodyStart, bodyEnd) };
+    openRe.lastIndex = bodyEnd + close.length;
+  }
+}
+
 function parseSheet(xml: string, sharedStrings: string[], name: string): Worksheet {
   const rows: SheetRow[] = [];
 
-  const rowRe = /<row(?:\s([^>]*))?>([\s\S]*?)<\/row>|<row\s([^>]*)\/>/g;
-  let rowMatch: RegExpExecArray | null;
   let fallbackRowNumber = 0;
 
-  while ((rowMatch = rowRe.exec(xml)) !== null) {
-    const attrs = rowMatch[1] ?? rowMatch[3] ?? '';
-    const body = rowMatch[2] ?? '';
+  for (const { attrs, body } of scanElements(xml, 'row')) {
     fallbackRowNumber += 1;
 
     const declared = /\br="(\d+)"/.exec(attrs)?.[1];
     const rowNumber = declared ? Number(declared) : fallbackRowNumber;
 
     const cells = new Map<number, string>();
-    const cellRe = /<c(?:\s([^>]*))?>([\s\S]*?)<\/c>|<c\s([^>]*)\/>/g;
-    let cellMatch: RegExpExecArray | null;
     let fallbackCol = 0;
 
-    while ((cellMatch = cellRe.exec(body)) !== null) {
-      const cellAttrs = cellMatch[1] ?? cellMatch[3] ?? '';
-      const cellBody = cellMatch[2] ?? '';
+    for (const { attrs: cellAttrs, body: cellBody } of scanElements(body, 'c')) {
 
       const ref = /\br="([A-Z]+\d+)"/i.exec(cellAttrs)?.[1];
       const col = ref ? columnIndex(ref) : fallbackCol;
