@@ -10,6 +10,7 @@ import { useToday } from '../hooks/useToday.js';
 import { ApiError } from '../api/client.js';
 import { ErrorState, LoadingState } from '../components/States.js';
 import { ROSTER_LABELS } from '../lib/format.js';
+import { ChangePasswordPanel } from '../components/ChangePasswordPanel.js';
 
 export function ProfilePage() {
   const { data, isLoading, error } = useToday();
@@ -50,9 +51,11 @@ export function ProfilePage() {
       </dl>
 
       <p className="profile__note">
-        To correct any of these details, or to have your password changed, contact the canteen
-        administrator.
+        To correct any of these details, contact the canteen administrator. You can change your
+        own password below.
       </p>
+
+      <ChangePasswordPanel />
     </main>
   );
 }
