@@ -7,7 +7,12 @@
  */
 
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { fetchSession, login as loginRequest, logout as logoutRequest } from '../api/endpoints.js';
+import {
+  changeOwnPassword,
+  fetchSession,
+  login as loginRequest,
+  logout as logoutRequest,
+} from '../api/endpoints.js';
 import { ApiError } from '../api/client.js';
 import type { SessionUser } from '../types/index.js';
 
@@ -59,6 +64,34 @@ export function useLogout() {
     // Clear the cache either way: if the call failed because the session was
     // already gone, the user still needs to end up signed out.
     onSettled: () => {
+      queryClient.setQueryData(SESSION_QUERY_KEY, null);
+      queryClient.clear();
+    },
+  });
+}
+
+/**
+ * Change your own password.
+ *
+ * On success the server has revoked every session, so the cached session is
+ * cleared and the whole query cache dropped - the same thing `useLogout` does.
+ * The user lands back on the sign-in screen and authenticates with the new
+ * password, which is the honest reflection of what the server just did.
+ */
+export function useChangeOwnPassword() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      currentPassword,
+      newPassword,
+      confirmPassword,
+    }: {
+      currentPassword: string;
+      newPassword: string;
+      confirmPassword: string;
+    }) => changeOwnPassword(currentPassword, newPassword, confirmPassword),
+    onSuccess: () => {
       queryClient.setQueryData(SESSION_QUERY_KEY, null);
       queryClient.clear();
     },

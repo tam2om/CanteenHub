@@ -87,7 +87,12 @@ describe('Session middleware reaches the /api/auth router', () => {
       {
         method: 'PUT',
         headers: { Cookie: employee.cookie, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ current_password: PASSWORD, new_password: 'Rotated!2026' }),
+        body: JSON.stringify({
+          current_password: PASSWORD,
+          new_password: 'Rotated!2026',
+          // The confirmation is now required server-side, not only in the UI.
+          confirm_password: 'Rotated!2026',
+        }),
       },
       env
     );

@@ -262,6 +262,40 @@ export async function logSelectionOverride(
  * password, when, and how many sessions that revoked; the secret itself is not
  * part of that answer.
  */
+/**
+ * A user changed THEIR OWN password.
+ *
+ * Separate from ADMIN_SET_EMPLOYEE_PASSWORD because the two are different
+ * events: one is an administrator acting on somebody else's account, the other
+ * is a person acting on their own. Collapsing them would make the log unable to
+ * answer "did an administrator touch this account?".
+ *
+ * Actor and target are the same employee, by construction - the route derives
+ * both from the session. No password value appears here, and none ever should.
+ */
+export async function logSelfPasswordChange(
+  db: D1Database,
+  employeeId: number,
+  amcoId: string,
+  sessionsRevoked: number,
+  ipAddress: string | null = null
+): Promise<AuditLog> {
+  return logAudit(db, {
+    actorId: employeeId,
+    action: 'CHANGE_OWN_PASSWORD',
+    entityType: 'EMPLOYEE',
+    entityId: employeeId,
+    beforeJson: null,
+    afterJson: JSON.stringify({
+      employee_id: employeeId,
+      amco_id: amcoId,
+      password_changed: true,
+      sessions_revoked: sessionsRevoked,
+    }),
+    ipAddress
+  });
+}
+
 export async function logPasswordChange(
   db: D1Database,
   actorId: number,

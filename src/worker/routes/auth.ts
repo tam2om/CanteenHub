@@ -5,12 +5,18 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types/env.js';
 import { getEmployeeForAuth, setEmployeePassword } from '../db/employees.js';
-import { createSession, deleteSessionByToken } from '../db/sessions.js';
+import { createSession, deleteSessionByToken, deleteSessionsForEmployee } from '../db/sessions.js';
 import { hashPassword, verifyPassword } from '../lib/auth.js';
 import { generateSessionToken, hashSessionToken } from '../lib/session.js';
 import { checkLoginLockout, recordLoginAttempt } from '../lib/rateLimit.js';
+import { validatePassword } from '../lib/password.js';
+import { logSelfPasswordChange } from '../services/audit.service.js';
 
 export const authRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+/** Same shape the admin routes use, so audit rows record the IP uniformly. */
+const clientIp = (c: { req: { header: (n: string) => string | undefined } }) =>
+  c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || null;
 
 /**
  * POST /api/auth/login
@@ -160,66 +166,119 @@ authRoutes.get('/me', async (c) => {
 });
 
 /**
- * PUT /api/auth/change-password
- * Change own password
+ * PUT /api/auth/change-password - change YOUR OWN password.
+ *
+ * WHOSE PASSWORD IS CHANGED: the one belonging to the session that made the
+ * request. There is no id in the path, none is read from the body, and the
+ * route never looks one up from client input - so there is no parameter an
+ * attacker could aim at somebody else's account.
+ *
+ * Open to any authenticated user, not administrators only. An employee whose
+ * password was handed to them in person needs to be able to replace it with
+ * something only they know; restricting that to admins would leave every
+ * employee permanently using a credential a third party has seen.
+ *
+ * The current password is verified SERVER-SIDE against the stored hash before
+ * anything is written. A live session alone is not sufficient authority to
+ * replace the credential that session was created with.
+ *
+ * Handling of the plaintext: both values exist only for the duration of this
+ * request. They are used to verify and to derive a hash, then discarded. They
+ * are never stored, returned, logged, or written into audit JSON - which is why
+ * the catch block below logs the error NAME and not the request body.
  */
 authRoutes.put('/change-password', async (c) => {
   const employee = c.get('employee');
-  
-  if (!employee) {
+  const session = c.get('session');
+
+  if (!employee || !session) {
     return c.json({ success: false, error: 'Not authenticated' }, 401);
   }
-  
+
+  let body: { current_password?: unknown; new_password?: unknown; confirm_password?: unknown };
   try {
-    const body = await c.req.json();
-    const { current_password, new_password } = body;
-    
-    if (!current_password || !new_password) {
-      return c.json({ 
-        success: false, 
-        error: 'Current and new password are required' 
-      }, 400);
-    }
-    
-    if (new_password.length < 8) {
-      return c.json({ 
-        success: false, 
-        error: 'Password must be at least 8 characters' 
-      }, 400);
-    }
-    
-    // Get current employee with password hash
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: 'A JSON body is required' }, 400);
+  }
+
+  const { current_password, new_password, confirm_password } = body;
+
+  if (typeof current_password !== 'string' || current_password.length === 0) {
+    return c.json({ success: false, error: 'Current password is required' }, 400);
+  }
+  if (typeof new_password !== 'string' || new_password.length === 0) {
+    return c.json({ success: false, error: 'New password is required' }, 400);
+  }
+  if (typeof confirm_password !== 'string' || confirm_password.length === 0) {
+    return c.json({ success: false, error: 'Confirm the new password' }, 400);
+  }
+
+  // Checked before the policy so a simple typo is reported as a typo rather
+  // than as whichever rule the mistyped value happens to break.
+  if (new_password !== confirm_password) {
+    return c.json({ success: false, error: 'The new passwords do not match' }, 400);
+  }
+
+  // The SHARED validator - the same one the administrator path uses. This
+  // route used to carry its own `< 8` check, which silently disagreed with the
+  // policy module and let a password through that no other path would accept.
+  const validation = validatePassword(new_password);
+  if (!validation.valid) {
+    // Names the rule that was broken, never the value that broke it.
+    return c.json({ success: false, error: validation.error }, 400);
+  }
+
+  if (new_password === current_password) {
+    return c.json(
+      { success: false, error: 'The new password must be different from the current one' },
+      400
+    );
+  }
+
+  try {
     const currentEmployee = await getEmployeeForAuth(c.env.DB, employee.amco_id);
-    
+
     if (!currentEmployee || !currentEmployee.password_hash) {
-      return c.json({ 
-        success: false, 
-        error: 'Cannot change password' 
-      }, 400);
+      // An account with no password set cannot prove a "current" one. The
+      // administrator sets the first password; that path is unchanged.
+      return c.json({ success: false, error: 'Cannot change password' }, 400);
     }
-    
-    // Verify current password
+
     const valid = await verifyPassword(current_password, currentEmployee.password_hash);
-    
     if (!valid) {
-      return c.json({ 
-        success: false, 
-        error: 'Current password is incorrect' 
-      }, 401);
+      return c.json({ success: false, error: 'Current password is incorrect' }, 401);
     }
-    
-    // Hash and set new password
+
+    // The EXISTING hashing implementation (PBKDF2-SHA-256, 100k iterations).
+    // No second scheme is introduced here.
     const newPasswordHash = await hashPassword(new_password);
     await setEmployeePassword(c.env.DB, employee.id, newPasswordHash);
-    
-    return c.json({ success: true });
-    
+
+    // Revoke every session this employee holds, exactly as the administrator
+    // path does. The old password must stop granting access immediately, and a
+    // live cookie would otherwise outlive it - including the caller's own,
+    // which is why the client has to sign in again.
+    const sessionsRevoked = await deleteSessionsForEmployee(c.env.DB, employee.id);
+
+    await logSelfPasswordChange(
+      c.env.DB,
+      employee.id,
+      employee.amco_id,
+      sessionsRevoked,
+      clientIp(c)
+    );
+
+    // A confirmation and a count. No password, no hash.
+    return c.json({
+      success: true,
+      data: { password_changed: true, sessionsRevoked },
+    });
   } catch (error) {
-    console.error('Change password error:', error);
-    return c.json({ 
-      success: false, 
-      error: 'Failed to change password' 
-    }, 500);
+    // Logged WITHOUT the request body, which holds both plaintexts.
+    console.error('Change password failed for employee id', employee.id);
+    if (error instanceof Error) console.error('Change password failure:', error.name);
+    return c.json({ success: false, error: 'Failed to change password' }, 500);
   }
 });
 

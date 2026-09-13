@@ -14,6 +14,24 @@ export const login = (amcoId: string, password: string) =>
 
 export const logout = () => api.post<null>('/api/auth/logout', {});
 
+/**
+ * Change YOUR OWN password.
+ *
+ * No user id is sent and none would be honoured: the server takes the account
+ * from the session cookie. Every session is revoked on success, including this
+ * one, so the caller has to sign in again.
+ */
+export const changeOwnPassword = (
+  currentPassword: string,
+  newPassword: string,
+  confirmPassword: string
+) =>
+  api.put<{ password_changed: boolean; sessionsRevoked: number }>('/api/auth/change-password', {
+    current_password: currentPassword,
+    new_password: newPassword,
+    confirm_password: confirmPassword,
+  });
+
 export const fetchSession = () => api.get<SessionUser>('/api/auth/me');
 
 export const fetchToday = (date?: string) =>

@@ -390,11 +390,15 @@ describe('Admin employee management', () => {
     });
 
     it('rejects a password that is too short, without echoing it', async () => {
-      const res = await setPassword(employee.id, 'short', admin.cookie);
+      // 'short' is five characters and became VALID when the minimum was
+      // lowered to 5. The property under test is unchanged - a password below
+      // the minimum is refused and never echoed - so the fixture moves to the
+      // new boundary rather than the assertion being relaxed.
+      const res = await setPassword(employee.id, 'four', admin.cookie);
       expect(res.status).toBe(400);
       const body = await readJson(res);
       expect(body.error).toContain('at least');
-      expect(JSON.stringify(body)).not.toContain('short');
+      expect(JSON.stringify(body)).not.toContain('four');
     });
 
     it('rejects an obviously guessable password', async () => {

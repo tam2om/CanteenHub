@@ -9,7 +9,23 @@
  * duplicated here. This module only decides whether a candidate is acceptable.
  */
 
-export const MIN_PASSWORD_LENGTH = 10;
+/**
+ * The single source of truth for how short a password may be.
+ *
+ * EVERY path that sets or changes a password validates through this module:
+ * the administrator setting an employee's password, an employee or
+ * administrator changing their own, and the bootstrap account. None of them
+ * carries its own length check, so this constant cannot be contradicted
+ * somewhere else in the codebase - which it previously was, by a hard-coded
+ * `< 8` in the change-password route.
+ *
+ * Lowered from 10 to 5 on request. Stated plainly because it is a real
+ * reduction in strength, not a formatting preference: a five-character password
+ * is within reach of offline brute force whatever the hash costs. PBKDF2-SHA-256
+ * at 100k iterations and the login rate limiter both still stand behind it, and
+ * neither was touched.
+ */
+export const MIN_PASSWORD_LENGTH = 5;
 export const MAX_PASSWORD_LENGTH = 200;
 
 /**
