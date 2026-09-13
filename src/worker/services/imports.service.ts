@@ -27,6 +27,22 @@ import {
   type StagedRowInput,
 } from '../repositories/imports.repo.js';
 
+/**
+ * Which worksheet a validator read, and on whose authority.
+ *
+ * `named` means the workbook itself said so - the sheet is called Lunch - and
+ * nothing further is required. `candidate` means no sheet was named for lunch
+ * and one was identified from its structure and wording instead. That is a
+ * decision the importer made, so it is recorded here, shown in the preview, and
+ * must be confirmed by name before the batch can be committed.
+ */
+export interface ValidationSheet {
+  name: string;
+  source: 'named' | 'candidate';
+  /** Why a candidate qualified. Present only for `candidate`. */
+  signals?: string[];
+}
+
 export interface ValidationOutcome {
   /** Rows staged for the preview. Empty when the type has no validator yet. */
   rows: StagedRowInput[];
@@ -34,6 +50,26 @@ export interface ValidationOutcome {
   fileMessages: string[];
   /** False when the file cannot proceed to preview. */
   passed: boolean;
+  /** Set by importers that choose between worksheets. */
+  sheet?: ValidationSheet;
+}
+
+/** The shape `import_batches.validation_summary` holds. No schema change: the
+ * column is already JSON text, and an older summary simply has no `sheet`. */
+export interface ValidationSummary {
+  fileMessages?: string[];
+  implemented?: boolean;
+  sheet?: ValidationSheet;
+}
+
+/** Read a batch's stored summary, tolerating anything unparseable. */
+export function readValidationSummary(raw: string | null): ValidationSummary {
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) as ValidationSummary;
+  } catch {
+    return {};
+  }
 }
 
 /**
@@ -171,7 +207,8 @@ export async function validateImport(
   await saveValidationResults(db, batchId, outcome.rows, {
     fileMessages: outcome.fileMessages,
     implemented: true,
-  });
+    ...(outcome.sheet ? { sheet: outcome.sheet } : {}),
+  } satisfies ValidationSummary);
 
   const passed = outcome.passed && outcome.rows.every((r) => r.status !== 'invalid');
 
@@ -195,7 +232,20 @@ export type CommitResult =
   | { kind: 'committed'; batch: ImportBatch }
   | { kind: 'not_implemented'; reason: string }
   | { kind: 'conflict'; reason: string }
+  | { kind: 'confirmation_required'; reason: string; sheet: ValidationSheet }
   | { kind: 'failed'; reason: string };
+
+export interface CommitOptions {
+  /**
+   * The worksheet name the administrator is confirming.
+   *
+   * Required only when validation identified the worksheet by content rather
+   * than by name. Echoing the NAME rather than passing a bare flag is
+   * deliberate: it confirms WHICH sheet is being imported, and a client that
+   * has not shown the administrator that name cannot produce it.
+   */
+  confirmSheet?: string;
+}
 
 /**
  * Commit a validated import.
@@ -214,7 +264,8 @@ export type CommitResult =
 export async function commitImport(
   db: D1Database,
   batchId: number,
-  actorId: number
+  actorId: number,
+  options: CommitOptions = {}
 ): Promise<CommitResult> {
   const batch = await getImportBatch(db, batchId);
   if (!batch) {
@@ -232,6 +283,24 @@ export async function commitImport(
       kind: 'conflict',
       reason: 'This import must pass validation before it can be committed.',
     };
+  }
+
+  // A worksheet the importer identified for itself is not committed until the
+  // administrator says, by name, that it is the right one. Checked BEFORE the
+  // batch is claimed, so a refused commit leaves the batch in `preview` and the
+  // administrator can simply confirm and retry.
+  const sheet = readValidationSummary(batch.validation_summary).sheet;
+  if (sheet?.source === 'candidate') {
+    const confirmed = (options.confirmSheet ?? '').trim().toLowerCase();
+    if (confirmed !== sheet.name.trim().toLowerCase()) {
+      return {
+        kind: 'confirmation_required',
+        reason:
+          `No worksheet in this workbook is named "Lunch". "${sheet.name}" was identified as ` +
+          'the lunch menu from its contents. Confirm that worksheet before committing.',
+        sheet,
+      };
+    }
   }
 
   const committer = COMMITTERS[batch.import_type];

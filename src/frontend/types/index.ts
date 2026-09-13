@@ -237,11 +237,27 @@ export interface ImportPreviewRow {
   preview: unknown;
 }
 
+/**
+ * Which worksheet an import read, and on whose authority.
+ *
+ * `named` - the workbook has a sheet called Lunch. `candidate` - it does not,
+ * and one was identified from its structure and wording, which the
+ * administrator must confirm by name before the import can be committed.
+ */
+export interface ImportSheet {
+  name: string;
+  source: 'named' | 'candidate';
+  signals?: string[];
+}
+
 export interface ImportDetail extends ImportBatch {
   importer_available: boolean;
   committer_available: boolean;
   preview_rows: ImportPreviewRow[];
   preview_row_limit: number;
+  sheet?: ImportSheet | null;
+  /** Present on the validate response. */
+  messages?: string[];
 }
 
 export interface ImportList {

@@ -34,62 +34,24 @@ import type { D1Database } from '@cloudflare/workers-types';
 import {
   listWorksheets,
   normalizeCell,
-  normalizeHeader,
   readWorksheet,
   XlsxError,
 } from '../lib/xlsx.js';
+import {
+  chooseLunchSheet,
+  findCandidateSheet,
+  findHeaderBand,
+  resolveColumns,
+  COMPONENT_COLUMNS,
+  type ComponentType,
+  type LunchSheetSelection,
+} from './menuSheet.js';
 import { isValidBusinessDate } from '../lib/datetime.js';
 import type { ImportBatch, StagedRowInput } from '../repositories/imports.repo.js';
 import type { ValidationOutcome } from '../services/imports.service.js';
 
 /** How a worksheet row will change production data. */
 export type MenuRowAction = 'CREATE' | 'UPDATE' | 'UNCHANGED' | 'INVALID';
-
-/**
- * Component types this importer writes.
- *
- * NOTE: the Phase 0 findings proposed `side` for the "Option Meal 2" column,
- * but the shipped schema's CHECK constraint allows only
- * condiment/beverage/dessert/salad/soup/bread/other. `other` is used rather
- * than widening a constraint from an importer; the component's NAME still
- * carries the real text.
- */
-type ComponentType = 'salad' | 'other' | 'condiment' | 'beverage' | 'dessert';
-
-/**
- * The component columns, in display order. `sort_order` follows this order so
- * the rendered menu is deterministic rather than insertion-dependent.
- */
-const COMPONENT_COLUMNS: Array<{ field: string; type: ComponentType; aliases: string[] }> = [
-  { field: 'salad', type: 'salad', aliases: ['option meal 1', 'salad'] },
-  { field: 'side', type: 'other', aliases: ['option meal 2', 'side'] },
-  { field: 'condiment', type: 'condiment', aliases: ['condiment', 'condiments'] },
-  { field: 'beverage', type: 'beverage', aliases: ['beverage', 'beverages', 'drinks'] },
-  {
-    field: 'dessert',
-    type: 'dessert',
-    aliases: ['dessert / fruits', 'dessert/fruits', 'dessert', 'dessert / fruit', 'fruits'],
-  },
-];
-
-const COLUMN_ALIASES: Record<string, string[]> = {
-  meal_date: ['date', 'meal date', 'menu date'],
-  option_1: ['option 1', 'option1', 'option 1 ', 'main 1'],
-  option_2: ['option 2', 'option2', 'main 2'],
-};
-
-/** Only the date and the two selectable options are structurally required. */
-const REQUIRED_COLUMNS = ['meal_date', 'option_1', 'option_2'] as const;
-
-/**
- * A column headed "Option 3" (or higher) is refused outright.
- *
- * The schema permits option_number 1 and 2 only, and "exactly two selectable
- * options" is a business rule, not a formatting preference. A workbook that
- * carries a third option is describing a different product and must be looked
- * at by a person.
- */
-const EXTRA_OPTION_PATTERN = /^option\s*(\d+)$/;
 
 const MAX_FIELD_LENGTH = 500;
 const MIN_YEAR = 2000;
@@ -295,37 +257,33 @@ async function loadExisting(
 }
 
 /**
- * Choose the lunch worksheet.
+ * Choose the lunch worksheet for a workbook.
  *
- * A menu workbook may hold a dinner sheet too, and importing dinner as lunch
- * would feed the wrong numbers to the caterer. So: prefer the single sheet
- * whose name mentions lunch; accept a lone sheet named plainly "menu" only when
- * nothing mentions dinner; otherwise refuse and say what the file contains.
+ * Two stages, in this order and never the other way round:
+ *
+ *   1. BY NAME. A sheet whose name mentions lunch is used exactly as it always
+ *      has been, with no confirmation step. This is the ordinary path and it is
+ *      deliberately untouched.
+ *   2. BY CONTENT, only when the names settle nothing. Each remaining sheet is
+ *      opened and judged on its own structure and wording. A single qualifying
+ *      sheet is returned as a CANDIDATE, which the administrator must confirm
+ *      before anything can be committed; two or more is an ambiguity the import
+ *      refuses to resolve on its own.
+ *
+ * A dinner sheet is never a candidate at either stage.
  */
-export function chooseLunchSheet(names: string[]): { name: string } | { error: string } {
-  const normalized = names.map((name) => ({ name, key: normalizeHeader(name) }));
-  const lunch = normalized.filter((s) => s.key.includes('lunch'));
+export async function selectLunchWorksheet(file: ArrayBuffer): Promise<LunchSheetSelection> {
+  const names = await listWorksheets(file);
 
-  if (lunch.length === 1) return { name: lunch[0].name };
-  if (lunch.length > 1) {
-    return {
-      error:
-        `This workbook has more than one lunch sheet (${lunch.map((s) => s.name).join(', ')}). ` +
-        'Leave a single lunch sheet in the file and upload it again.',
-    };
-  }
+  const byName = chooseLunchSheet(names);
+  if ('error' in byName) return byName;
+  if ('name' in byName) return { name: byName.name, source: 'named' };
 
-  const mentionsDinner = normalized.some((s) => s.key.includes('dinner'));
-  const plainMenu = normalized.filter((s) => s.key === 'menu' || s.key.includes('menu'));
-  if (!mentionsDinner && plainMenu.length === 1) return { name: plainMenu[0].name };
-
-  return {
-    error:
-      'No lunch worksheet was found. Name the lunch sheet "Lunch" (this import never ' +
-      `guesses, so a dinner sheet is not read as lunch). This workbook contains: ${
-        names.join(', ') || 'no sheets'
-      }.`,
-  };
+  return findCandidateSheet(
+    names,
+    async (name) => (await readWorksheet(file, name)).rows,
+    parseMenuDate
+  );
 }
 
 /**
@@ -339,12 +297,13 @@ export async function validateMenuWorkbook(
   file: ArrayBuffer
 ): Promise<ValidationOutcome> {
   let sheet;
+  let selection: LunchSheetSelection;
   try {
-    const chosen = chooseLunchSheet(await listWorksheets(file));
-    if ('error' in chosen) {
-      return { rows: [], fileMessages: [chosen.error], passed: false };
+    selection = await selectLunchWorksheet(file);
+    if ('error' in selection) {
+      return { rows: [], fileMessages: [selection.error], passed: false };
     }
-    sheet = await readWorksheet(file, chosen.name);
+    sheet = await readWorksheet(file, selection.name);
   } catch (error) {
     return {
       rows: [],
@@ -357,70 +316,53 @@ export async function validateMenuWorkbook(
     };
   }
 
+  // Carried through every later message so the administrator is never in doubt
+  // about WHICH worksheet produced the preview they are approving.
+  const sheetInfo: NonNullable<ValidationOutcome['sheet']> =
+    selection.source === 'candidate'
+      ? { name: selection.name, source: 'candidate', signals: selection.signals }
+      : { name: selection.name, source: 'named' };
+
+  const fail = (messages: string[]): ValidationOutcome => ({
+    rows: [],
+    fileMessages: messages,
+    passed: false,
+    sheet: sheetInfo,
+  });
+
   if (sheet.rows.length === 0) {
-    return { rows: [], fileMessages: ['The worksheet is empty.'], passed: false };
+    return fail(['The worksheet is empty.']);
   }
 
   // ---- headers -------------------------------------------------------------
-  const headerRow = sheet.rows[0];
-  const columns = new Map<string, number>();
-  const componentColumns = new Map<string, number>();
-  const duplicateHeaders: string[] = [];
+  // The header is LOCATED rather than assumed to be row 1: a real workbook puts
+  // a title above it and splits it across two merged rows.
+  const band = findHeaderBand(sheet.rows);
+  if (!band) {
+    return fail(['The worksheet is empty.']);
+  }
+
+  const resolved = resolveColumns(band.raw);
+  const { columns, componentColumns } = resolved;
   const fileMessages: string[] = [];
 
-  for (const [index, raw] of headerRow.cells) {
-    const header = normalizeHeader(raw);
-    if (!header) continue;
-
-    // A third selectable option is refused before anything else is considered.
-    const extra = EXTRA_OPTION_PATTERN.exec(header);
-    if (extra && Number(extra[1]) > 2) {
-      return {
-        rows: [],
-        fileMessages: [
-          `This worksheet has a column headed "${raw.trim()}". A lunch menu day has exactly ` +
-            'two selectable options; a third cannot be imported. If this column is an ' +
-            'accompaniment rather than a choice, rename it to the component it is.',
-        ],
-        passed: false,
-      };
-    }
-
-    let matched = false;
-    for (const [field, aliases] of Object.entries(COLUMN_ALIASES)) {
-      if (!aliases.includes(header)) continue;
-      if (columns.has(field)) duplicateHeaders.push(header);
-      else columns.set(field, index);
-      matched = true;
-      break;
-    }
-    if (matched) continue;
-
-    for (const column of COMPONENT_COLUMNS) {
-      if (!column.aliases.includes(header)) continue;
-      if (componentColumns.has(column.field)) duplicateHeaders.push(header);
-      else componentColumns.set(column.field, index);
-      break;
-    }
+  // A third selectable option is refused before anything else is considered.
+  if (resolved.extraOption) {
+    return fail([
+      `This worksheet has a column headed "${resolved.extraOption}". A lunch menu day has exactly ` +
+        'two selectable options; a third cannot be imported. If this column is an ' +
+        'accompaniment rather than a choice, rename it to the component it is.',
+    ]);
   }
 
-  if (duplicateHeaders.length > 0) {
-    return {
-      rows: [],
-      fileMessages: [
-        `The worksheet has more than one column headed: ${[...new Set(duplicateHeaders)].join(', ')}.`,
-      ],
-      passed: false,
-    };
+  if (resolved.duplicates.length > 0) {
+    return fail([
+      `The worksheet has more than one column headed: ${resolved.duplicates.join(', ')}.`,
+    ]);
   }
 
-  const missing = REQUIRED_COLUMNS.filter((field) => !columns.has(field));
-  if (missing.length > 0) {
-    return {
-      rows: [],
-      fileMessages: [`The worksheet is missing required column(s): ${missing.join(', ')}.`],
-      passed: false,
-    };
+  if (resolved.missing.length > 0) {
+    return fail([`The worksheet is missing required column(s): ${resolved.missing.join(', ')}.`]);
   }
 
   // ---- rows ----------------------------------------------------------------
@@ -432,7 +374,7 @@ export async function validateMenuWorkbook(
     index === undefined ? '' : normalizeMenuText(row.cells.get(index));
 
   const parsed: ParsedRow[] = [];
-  for (const row of sheet.rows.slice(1)) {
+  for (const row of sheet.rows.slice(band.dataIndex)) {
     const dateRaw = dateCell(row, columns.get('meal_date'));
     const option1 = textCell(row, columns.get('option_1'));
     const option2 = textCell(row, columns.get('option_2'));
@@ -458,11 +400,7 @@ export async function validateMenuWorkbook(
   }
 
   if (parsed.length === 0) {
-    return {
-      rows: [],
-      fileMessages: ['The worksheet contains no data rows.'],
-      passed: false,
-    };
+    return fail(['The worksheet contains no data rows.']);
   }
 
   // ---- first pass: parse and validate each row -----------------------------
@@ -630,6 +568,19 @@ export async function validateMenuWorkbook(
     staged.push({ rowNumber: row.rowNumber, status: 'valid', messages: [], preview });
   }
 
+  // The worksheet is named FIRST, above the counts: when it was identified by
+  // content rather than by its name, the administrator is approving a decision
+  // this importer made, and must be able to see it without hunting for it.
+  if (sheetInfo.source === 'candidate') {
+    fileMessages.push(
+      `No worksheet in this workbook is named "Lunch". "${sheetInfo.name}" was identified as ` +
+        `the lunch menu because ${(sheetInfo.signals ?? []).join(', and ')}. Confirm that this is the ` +
+        'right worksheet before committing - nothing is imported until you do.'
+    );
+  } else {
+    fileMessages.push(`Read from the "${sheetInfo.name}" worksheet.`);
+  }
+
   fileMessages.push(
     `${createCount} new menu day(s), ${updateCount} changed, ${unchangedCount} already correct.`
   );
@@ -649,7 +600,7 @@ export async function validateMenuWorkbook(
   }
 
   // Any invalid row blocks the whole workbook: there are no partial imports.
-  return { rows: staged, fileMessages, passed: invalidCount === 0 };
+  return { rows: staged, fileMessages, passed: invalidCount === 0, sheet: sheetInfo };
 }
 
 /**

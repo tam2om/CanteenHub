@@ -55,7 +55,10 @@ export function useValidateImport() {
 export function useCommitImport() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: number) => commitImport(id),
+    mutationFn: (input: number | { id: number; confirmSheet?: string }) =>
+      typeof input === 'number'
+        ? commitImport(input)
+        : commitImport(input.id, input.confirmSheet),
     // Always refetch: the server owns the resulting state, including whether a
     // concurrent request already committed this batch.
     onSettled: () => queryClient.invalidateQueries({ queryKey: IMPORTS_KEY }),

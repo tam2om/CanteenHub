@@ -32,6 +32,7 @@ import {
   commitImport,
   hasCommitter,
   hasValidator,
+  readValidationSummary,
   validateImport,
   NOT_IMPLEMENTED_REASON,
 } from '../services/imports.service.js';
@@ -263,6 +264,7 @@ app.get('/:id', async (c) => {
         preview: row.preview_json ? JSON.parse(row.preview_json) : null,
       })),
       preview_row_limit: MAX_PREVIEW_ROWS,
+      sheet: readValidationSummary(batch.validation_summary).sheet ?? null,
     },
   });
 });
@@ -313,23 +315,11 @@ app.post('/:id/validate', async (c) => {
   }
 
   // `validation_summary` is written by the same call that set the status, so
-  // the two cannot disagree.
-  let fileMessages: string[] = [];
-  let implemented = true;
-  if (batch.validation_summary) {
-    try {
-      const summary = JSON.parse(batch.validation_summary) as {
-        fileMessages?: string[];
-        implemented?: boolean;
-      };
-      fileMessages = summary.fileMessages ?? [];
-      implemented = summary.implemented !== false;
-    } catch {
-      // A summary we cannot parse is not worth failing the request over; the
-      // status and counts on the row are the authoritative result.
-      fileMessages = [];
-    }
-  }
+  // the two cannot disagree. A summary we cannot parse is not worth failing the
+  // request over; the status and counts on the row are the authoritative result.
+  const summary = readValidationSummary(batch.validation_summary);
+  const fileMessages = summary.fileMessages ?? [];
+  const implemented = summary.implemented !== false;
 
   const outcome = !implemented
     ? 'not_implemented'
@@ -344,6 +334,9 @@ app.post('/:id/validate', async (c) => {
       importer_available: implemented,
       outcome,
       messages: fileMessages,
+      // Which worksheet produced this preview, and whether the administrator
+      // has to confirm it. Absent for imports that do not choose a worksheet.
+      sheet: summary.sheet ?? null,
     },
   });
 });
@@ -368,7 +361,33 @@ app.post('/:id/commit', async (c) => {
     return c.json({ success: false, error: 'Import not found' }, 404);
   }
 
-  const result = await commitImport(db, id, actorId);
+  // An optional, additive body field. Required only when validation identified
+  // the worksheet by content; every existing client that posts `{}` is
+  // unaffected for every workbook whose lunch sheet is named.
+  let confirmSheet: string | undefined;
+  try {
+    const body = (await c.req.json()) as { confirm_sheet?: unknown };
+    if (typeof body?.confirm_sheet === 'string') confirmSheet = body.confirm_sheet;
+  } catch {
+    // No body, or not JSON. Treated as "nothing confirmed", which is refused
+    // below only when a confirmation is actually required.
+  }
+
+  const result = await commitImport(db, id, actorId, { confirmSheet });
+
+  if (result.kind === 'confirmation_required') {
+    // Not an audit event: nothing was attempted and nothing changed. The batch
+    // is still in `preview`, so confirming and retrying is all that is needed.
+    return c.json(
+      {
+        success: false,
+        error: result.reason,
+        outcome: 'confirmation_required',
+        sheet: result.sheet,
+      },
+      409
+    );
+  }
 
   if (result.kind === 'not_implemented') {
     await logImportChange(

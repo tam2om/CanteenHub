@@ -609,3 +609,139 @@ describe('Menu import - handles no credentials', () => {
     expect(document.body.textContent ?? '').not.toMatch(/eligible|ROSTER_MISSING/i);
   });
 });
+
+// ============================================================================
+// WORKSHEET CONFIRMATION
+//
+// When no sheet is named "Lunch" the server identifies one from its contents
+// and says so. That decision must reach the administrator, and must not be
+// committable until they accept it by name.
+// ============================================================================
+
+const CANDIDATE_SHEET = {
+  name: 'Page 1',
+  source: 'candidate' as const,
+  signals: [
+    'the worksheet says "lunch" above or in its column headers',
+    'its header row names Date, Option 1 and Option 2, and 4 row(s) below carry real dates',
+  ],
+};
+
+function candidateRoutes(overrides: Record<string, { status?: number; body: unknown }> = {}) {
+  return routes({
+    [validatePath(BATCH_ID)]: ok({
+      ...detail({ sheet: CANDIDATE_SHEET }),
+      outcome: 'ready',
+      messages: [
+        'No worksheet in this workbook is named "Lunch". "Page 1" was identified as the lunch menu.',
+      ],
+      sheet: CANDIDATE_SHEET,
+    }),
+    [detailPath(BATCH_ID)]: ok(detail({ sheet: CANDIDATE_SHEET })),
+    ...overrides,
+  });
+}
+
+describe('Menu import - worksheet confirmation', () => {
+  it('names the identified worksheet and why it qualified', async () => {
+    stubFetch(candidateRoutes());
+    const user = userEvent.setup();
+
+    renderWithProviders(<AdminMenuImportPage />);
+    await screen.findByRole('button', { name: 'Upload and validate' });
+    await uploadWorkbook(user);
+
+    // Said twice on purpose: once in the server's own message list, once in
+    // the panel carrying the checkbox.
+    expect((await screen.findAllByText(/No worksheet in this workbook is named/i)).length)
+      .toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText('Page 1').length).toBeGreaterThan(0);
+    expect(screen.getByText(/its header row names Date, Option 1 and Option 2/i)).toBeInTheDocument();
+  });
+
+  it('DISABLES commit until the worksheet is acknowledged', async () => {
+    stubFetch(candidateRoutes());
+    const user = userEvent.setup();
+
+    renderWithProviders(<AdminMenuImportPage />);
+    await screen.findByRole('button', { name: 'Upload and validate' });
+    await uploadWorkbook(user);
+
+    const commitButton = await screen.findByRole('button', { name: 'Commit this import' });
+    expect(commitButton).toBeDisabled();
+
+    await user.click(screen.getByRole('checkbox'));
+    expect(await screen.findByRole('button', { name: 'Commit this import' })).toBeEnabled();
+  });
+
+  it('sends the confirmed worksheet NAME with the commit', async () => {
+    const fetchMock = stubFetch(candidateRoutes());
+    const user = userEvent.setup();
+
+    renderWithProviders(<AdminMenuImportPage />);
+    await screen.findByRole('button', { name: 'Upload and validate' });
+    await uploadWorkbook(user);
+    await user.click(await screen.findByRole('checkbox'));
+    await user.click(await screen.findByRole('button', { name: 'Commit this import' }));
+    await user.click(await screen.findByRole('button', { name: 'Commit import' }));
+
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url) === commitPath(BATCH_ID))).toBe(true)
+    );
+    const call = fetchMock.mock.calls.find(([url]) => String(url) === commitPath(BATCH_ID))!;
+    expect(JSON.parse(String((call[1] as RequestInit).body))).toEqual({ confirm_sheet: 'Page 1' });
+  });
+
+  it('asks for NO confirmation when the workbook has a named lunch sheet', async () => {
+    const fetchMock = stubFetch(
+      routes({
+        [validatePath(BATCH_ID)]: ok({
+          ...detail({ sheet: { name: 'Lunch', source: 'named' } }),
+          outcome: 'ready',
+          messages: ['Read from the "Lunch" worksheet.'],
+          sheet: { name: 'Lunch', source: 'named' },
+        }),
+        [detailPath(BATCH_ID)]: ok(detail({ sheet: { name: 'Lunch', source: 'named' } })),
+      })
+    );
+    const user = userEvent.setup();
+
+    renderWithProviders(<AdminMenuImportPage />);
+    await screen.findByRole('button', { name: 'Upload and validate' });
+    await uploadWorkbook(user);
+
+    expect(await screen.findByRole('button', { name: 'Commit this import' })).toBeEnabled();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Commit this import' }));
+    await user.click(await screen.findByRole('button', { name: 'Commit import' }));
+
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url) === commitPath(BATCH_ID))).toBe(true)
+    );
+    const call = fetchMock.mock.calls.find(([url]) => String(url) === commitPath(BATCH_ID))!;
+    expect(JSON.parse(String((call[1] as RequestInit).body))).toEqual({});
+  });
+
+  it('surfaces the server refusing an unconfirmed worksheet', async () => {
+    stubFetch(
+      candidateRoutes({
+        [commitPath(BATCH_ID)]: fail(
+          409,
+          'No worksheet in this workbook is named "Lunch". "Page 1" was identified as the lunch menu from its contents. Confirm that worksheet before committing.'
+        ),
+      })
+    );
+    const user = userEvent.setup();
+
+    renderWithProviders(<AdminMenuImportPage />);
+    await screen.findByRole('button', { name: 'Upload and validate' });
+    await uploadWorkbook(user);
+    await user.click(await screen.findByRole('checkbox'));
+    await user.click(await screen.findByRole('button', { name: 'Commit this import' }));
+    await user.click(await screen.findByRole('button', { name: 'Commit import' }));
+
+    expect(await screen.findByText(/Confirm that worksheet before committing/i)).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Import complete' })).not.toBeInTheDocument();
+  });
+});

@@ -20,8 +20,18 @@ export const getImport = (id: number) => api.get<ImportDetail>(`/api/admin/impor
 export const validateImport = (id: number) =>
   api.post<ImportDetail>(`/api/admin/imports/${id}/validate`, {});
 
-export const commitImport = (id: number) =>
-  api.post<ImportDetail>(`/api/admin/imports/${id}/commit`, {});
+/**
+ * Commit a validated import.
+ *
+ * `confirmSheet` is sent only when validation identified the worksheet by its
+ * contents rather than its name; the server refuses the commit unless the name
+ * the administrator saw comes back with it.
+ */
+export const commitImport = (id: number, confirmSheet?: string) =>
+  api.post<ImportDetail>(
+    `/api/admin/imports/${id}/commit`,
+    confirmSheet ? { confirm_sheet: confirmSheet } : {}
+  );
 
 /**
  * Upload a workbook, opening a new import batch.
