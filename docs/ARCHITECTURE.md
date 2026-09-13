@@ -1433,6 +1433,11 @@ Rate limiting rules, backup/restore rehearsal, load sanity check, accessibility 
 30. **All imported text is trimmed and internal whitespace collapsed**, because the real employee sheet contains `"Maintenance  "` and `" Fleet &Transportation  "` — untrimmed, these become duplicate-looking rows in every department report.
 31. **Dish names are stored verbatim.** The real menus contain typos and inconsistent spellings of the same item. Correcting them is the administrator's job on the edit screen, not the importer's — an importer that rewrites data it does not understand is worse than one that preserves a typo.
 
+*Added after the first real lunch workbook was uploaded to production (2026-09-13):*
+
+32. **A worksheet is identified as lunch by its NAME, or by its STRUCTURE AND WORDING TOGETHER — never by its position.** The real file's only sheet is called `Page 1`, so a name-only rule rejected a perfectly good menu; "use the only sheet" would have been the easy fix and is exactly the rule that imports a dinner menu the day a second sheet appears. A sheet with no lunch name qualifies only if its header resolves Date, Option 1 and Option 2, it carries real dates, and the word *lunch* appears in its title or headers — and even then it is a **candidate the administrator must confirm by name before commit**, never an import that proceeds on the importer's own authority. Anything mentioning dinner is excluded outright, whatever its shape. Two candidates is an error, not a tie to break.
+33. **The header is located, not assumed to be row 1, and may span two rows.** The real file wastes row 1 on a title and merges `Lunch Menu` across the two option columns, putting the usable labels on row 3. The lower row of a band wins where it has text and the upper row carries down where it does not, which is what a merged header means. The scan is bounded to the first ten rows so a data row can never be mistaken for a header.
+
 ---
 
 # Open Questions

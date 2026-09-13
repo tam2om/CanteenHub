@@ -21,7 +21,7 @@ import {
 import { ApiError } from '../../api/client.js';
 import { EmptyState, ErrorState, LoadingState } from '../../components/States.js';
 import { ConfirmDialog } from '../../components/ConfirmDialog.js';
-import type { ImportDetail, ImportPreviewRow } from '../../types/index.js';
+import type { ImportDetail, ImportPreviewRow, ImportSheet } from '../../types/index.js';
 
 /** Mirrors the server's per-row classification. */
 type Action = 'CREATE' | 'UPDATE' | 'UNCHANGED' | 'INVALID';
@@ -80,6 +80,7 @@ export function AdminMenuImportPage() {
   const [batchId, setBatchId] = useState<number | null>(null);
   const [clientError, setClientError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [sheetAcknowledged, setSheetAcknowledged] = useState(false);
   const [committed, setCommitted] = useState<ImportDetail | null>(null);
 
   const uploadMutation = useUploadImport();
@@ -92,6 +93,7 @@ export function AdminMenuImportPage() {
     setBatchId(null);
     setClientError(null);
     setConfirming(false);
+    setSheetAcknowledged(false);
     setCommitted(null);
     uploadMutation.reset();
     validateMutation.reset();
@@ -121,12 +123,21 @@ export function AdminMenuImportPage() {
   const current = detail.data;
   const rows = current?.preview_rows ?? [];
   const counts = countByAction(rows);
-  const summaryMessages =
-    (validateMutation.data as ImportDetail & { messages?: string[] } | undefined)?.messages ?? [];
+  const summaryMessages = validateMutation.data?.messages ?? [];
+
+  // Which worksheet the server read. `candidate` means no sheet was named
+  // "Lunch" and the server identified one from its contents - a decision this
+  // screen must put in front of the administrator rather than absorb.
+  const sheet: ImportSheet | null =
+    current?.sheet ?? validateMutation.data?.sheet ?? null;
+  const needsSheetConfirmation = sheet?.source === 'candidate';
 
   // The server is the authority on whether a commit is permitted; the button
-  // simply reflects it.
-  const canCommit = current?.status === 'preview';
+  // simply reflects it. The worksheet acknowledgement is an ADDITIONAL local
+  // gate - the server refuses an unconfirmed candidate regardless, so this only
+  // stops the administrator sending a request that would be refused.
+  const canCommit =
+    current?.status === 'preview' && (!needsSheetConfirmation || sheetAcknowledged);
 
   const mutationError = (error: unknown, fallback: string) =>
     error instanceof ApiError ? error.message : error ? fallback : null;
@@ -151,8 +162,10 @@ export function AdminMenuImportPage() {
           <p className="panel__note">
             Upload the <strong>lunch</strong> menu workbook (.xlsx), one row per date with{' '}
             <strong>Date</strong>, <strong>Option 1</strong> and <strong>Option 2</strong>, plus the
-            accompaniment columns. The lunch sheet must be named so it can be identified — a dinner
-            sheet is never read as lunch. Uploading does not change anything on its own.
+            accompaniment columns. Name the lunch sheet <strong>Lunch</strong> if you can; if no
+            sheet is named for lunch, one is identified from its contents and you are asked to
+            confirm it before anything is imported — a dinner sheet is never read as lunch.
+            Uploading does not change anything on its own.
           </p>
           <p className="panel__note">
             “Option Meal 1” and “Option Meal 2” are accompaniments served with whichever main is
@@ -233,12 +246,42 @@ export function AdminMenuImportPage() {
               </li>
             </ul>
 
+            {sheet && !needsSheetConfirmation && (
+              <p className="panel__note">
+                Read from the <strong>{sheet.name}</strong> worksheet.
+              </p>
+            )}
+
             {summaryMessages.length > 0 && (
               <ul className="messages">
                 {summaryMessages.map((message) => (
                   <li key={message}>{message}</li>
                 ))}
               </ul>
+            )}
+
+            {needsSheetConfirmation && sheet && (
+              <div className="feedback feedback--warn" role="status">
+                <p>
+                  No worksheet in this workbook is named <strong>Lunch</strong>. The worksheet{' '}
+                  <strong>{sheet.name}</strong> was identified as the lunch menu because{' '}
+                  {(sheet.signals ?? []).join(', and ')}.
+                </p>
+                <p>
+                  Check that this is the right worksheet. A dinner menu is never identified this
+                  way, but only you can confirm which sheet you meant to import.
+                </p>
+                <label className="field field--check">
+                  <input
+                    type="checkbox"
+                    checked={sheetAcknowledged}
+                    onChange={(e) => setSheetAcknowledged(e.target.checked)}
+                  />
+                  <span>
+                    Yes — import the <strong>{sheet.name}</strong> worksheet as the lunch menu.
+                  </span>
+                </label>
+              </div>
             )}
 
             {current.failure_reason && (
@@ -375,13 +418,21 @@ export function AdminMenuImportPage() {
                 busy={commitMutation.isPending}
                 onCancel={() => setConfirming(false)}
                 onConfirm={() =>
-                  commitMutation.mutate(current.id, {
-                    onSuccess: (result) => {
-                      setCommitted(result);
-                      setConfirming(false);
+                  commitMutation.mutate(
+                    {
+                      id: current.id,
+                      // Sent only for a candidate: the server requires the NAME
+                      // back, so a screen that never showed it cannot commit.
+                      confirmSheet: needsSheetConfirmation ? sheet?.name : undefined,
                     },
-                    onError: () => setConfirming(false),
-                  })
+                    {
+                      onSuccess: (result) => {
+                        setCommitted(result);
+                        setConfirming(false);
+                      },
+                      onError: () => setConfirming(false),
+                    }
+                  )
                 }
               />
             )}

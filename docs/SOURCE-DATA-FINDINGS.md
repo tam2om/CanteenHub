@@ -11,6 +11,27 @@ below held, including the referential finding. **The lunch and dinner menus are
 still PDFs** — no menu `.xlsx` exists anywhere — so §3 remains analysis rather
 than importer validation.
 
+**Post-release update, 2026-09-13 — a lunch menu workbook now exists.** A
+converted `Food Menu Lunch Sep-2026 conv.xlsx` was uploaded to production and
+the importer refused it. The workbook was NOT examined during this work and is
+not in the repository; what is recorded here is the structure its uploader
+described and the importer's own response:
+
+- one worksheet, named **`Page 1`** — nothing in the name says lunch;
+- **A1 = "Lunch"**, a title row above the header;
+- the header spans **two rows**: `Day | Date | Lunch Menu | Option per Person |
+  Condiment | Beverage | Dessert / Fruits` on row 2, with `Option 1`,
+  `Option 2`, `Option Meal 1`, `Option Meal 2` on row 3 beneath the merged
+  group cells;
+- rows 4–33 carry 1–30 September.
+
+Both of those shapes were rejected by the importer as originally written, and
+both are now handled — see `ARCHITECTURE.md` §13 and
+`src/worker/imports/menuSheet.ts`. **The real workbook itself remains
+unvalidated**: the fix is verified against a sanitized fixture reproducing this
+structure, not against the file, which has never been read by this repository's
+tests or by anyone working on them.
+
 Files examined:
 
 | File | Type | Contents |

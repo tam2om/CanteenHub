@@ -288,3 +288,83 @@ export function menuRow(
 ): Array<string | null> {
   return [day, date, option1, option2, salad, side, condiment, beverage, dessert];
 }
+
+
+/**
+ * The two-row header band the REAL September workbook uses.
+ *
+ * Reproduced structurally from the file an administrator actually uploaded -
+ * and only structurally. Every dish name below is invented; no real menu text,
+ * employee data or business content from the source workbook appears here or
+ * anywhere in this repository.
+ *
+ *   row 1   Lunch                                     <- title, nothing else
+ *   row 2   Day | Date | Lunch Menu |  | Option per Person |  | Condiment | ...
+ *   row 3         |      | Option 1 | Option 2 | Option Meal 1 | Option Meal 2
+ *   row 4+  the month, one row per day
+ *
+ * "Lunch Menu" is merged across the two option columns and "Option per Person"
+ * across the two accompaniment columns, so the usable labels sit on the LOWER
+ * row of the band while Day, Date and the trailing columns carry down from the
+ * upper one.
+ */
+export const REAL_WORLD_TITLE_ROW: Array<string | null> = ['Lunch'];
+
+export const REAL_WORLD_UPPER_HEADERS: Array<string | null> = [
+  'Day',
+  'Date',
+  'Lunch Menu',
+  null,
+  'Option per Person',
+  null,
+  'Condiment',
+  'Beverage',
+  'Dessert / Fruits',
+];
+
+export const REAL_WORLD_LOWER_HEADERS: Array<string | null> = [
+  null,
+  null,
+  'Option 1',
+  'Option 2',
+  'Option Meal 1',
+  'Option Meal 2',
+  null,
+  null,
+  null,
+];
+
+/**
+ * A workbook in the real-world shape: a title row, a merged two-row header, and
+ * a sheet name that says nothing about lunch.
+ */
+export function buildRealWorldMenuWorkbook(
+  rows: Array<Array<string | null>>,
+  {
+    sheetName = 'Page 1',
+    title = REAL_WORLD_TITLE_ROW,
+    upper = REAL_WORLD_UPPER_HEADERS,
+    lower = REAL_WORLD_LOWER_HEADERS,
+  }: {
+    sheetName?: string;
+    title?: Array<string | null>;
+    upper?: Array<string | null>;
+    lower?: Array<string | null>;
+  } = {}
+): Uint8Array {
+  return buildWorkbook([{ name: sheetName, rows: [title, upper, lower, ...rows] }]);
+}
+
+/** The same sheet shape, for composing multi-sheet workbooks. */
+export function realWorldSheet(
+  name: string,
+  rows: Array<Array<string | null>>,
+  title: Array<string | null> = REAL_WORLD_TITLE_ROW
+): SheetSpec {
+  return {
+    name,
+    rows: [title, REAL_WORLD_UPPER_HEADERS, REAL_WORLD_LOWER_HEADERS, ...rows] as Array<
+      Array<string | null>
+    >,
+  };
+}
