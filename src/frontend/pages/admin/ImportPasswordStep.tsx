@@ -87,11 +87,24 @@ export function ImportPasswordStep({ file, sheetName, onDone }: Props) {
         return;
       }
 
-      // The committed employees, so an AMCO ID can be turned into the row id
-      // the password endpoint takes. Paged generously: the import that produced
-      // them may have created hundreds.
-      const list = await listEmployees({ pageSize: 1000, page: 1 });
-      const idByAmco = new Map(list.employees.map((e) => [e.amco_id.toUpperCase(), e.id]));
+      // The committed employees, so an AMCO ID can be turned into the row id the
+      // password endpoint takes.
+      //
+      // PAGED, not fetched in one go: the server caps page_size at 100 however
+      // large a number is asked for. A single request therefore returns the
+      // first 100 employees, and every password past that would have failed
+      // with "no employee with this AMCO ID" - silently, for exactly the large
+      // imports this step exists to serve.
+      const PAGE_SIZE = 100;
+      const idByAmco = new Map<string, number>();
+      for (let page = 1; ; page++) {
+        const list = await listEmployees({ pageSize: PAGE_SIZE, page });
+        for (const e of list.employees) idByAmco.set(e.amco_id.toUpperCase(), e.id);
+        // Stop on a short page, and guard against a server that ignores paging.
+        if (list.employees.length < PAGE_SIZE) break;
+        if (idByAmco.size >= list.total) break;
+        if (page > 200) break;
+      }
 
       const entries = [...passwords.entries()];
       const failed: Progress['failed'] = [];

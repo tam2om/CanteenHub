@@ -586,3 +586,46 @@ describe('Employee import - location and password columns', () => {
     expect(counts.UNCHANGED + counts.UPDATE).toBe(1);
   });
 });
+
+// ============================================================================
+// The employee list is PAGED - which the password step has to respect
+// ============================================================================
+
+describe('Employee list paging', () => {
+  let db: TestD1Database;
+  let env: ReturnType<typeof testEnv>;
+  let admin: SeededEmployee;
+
+  beforeEach(async () => {
+    db = createTestDb();
+    env = testEnv(db);
+    admin = await seedEmployee(db, { amcoId: 'TEST670', roleId: ROLE_ADMIN });
+    for (let i = 0; i < 120; i++) {
+      await seedEmployee(db, { amcoId: `TESTP${String(i).padStart(3, '0')}` });
+    }
+  });
+
+  const list = (query: string) =>
+    app.request(`${BASE}/api/admin/employees?${query}`, { headers: { Cookie: admin.cookie } }, env);
+
+  it('caps page_size at 100 however large a value is asked for', async () => {
+    // The reason this matters: a caller that asks for 1000 and assumes it got
+    // everything silently loses every employee past the first 100.
+    const body = await readJson(await list('page_size=1000&page=1'));
+    expect(body.data.employees.length).toBe(100);
+    expect(body.data.total).toBe(121);
+  });
+
+  it('returns the remainder on the next page, so paging reaches everyone', async () => {
+    const first = await readJson(await list('page_size=100&page=1'));
+    const second = await readJson(await list('page_size=100&page=2'));
+
+    const ids = new Set<string>([
+      ...first.data.employees.map((e: { amco_id: string }) => e.amco_id),
+      ...second.data.employees.map((e: { amco_id: string }) => e.amco_id),
+    ]);
+    expect(ids.size).toBe(121);
+    expect(ids.has('TESTP000')).toBe(true);
+    expect(ids.has('TESTP119')).toBe(true);
+  });
+});
