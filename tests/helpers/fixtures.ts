@@ -46,6 +46,7 @@ export async function seedEmployee(
     isActive?: boolean;
     department?: string;
     section?: string;
+    defaultLocation?: 'amco_canteen' | 'omco_canteen' | 'whc_canteen';
   }
 ): Promise<SeededEmployee> {
   const {
@@ -56,14 +57,16 @@ export async function seedEmployee(
     isActive = true,
     department = 'Test Department',
     section = 'Test Section',
+    defaultLocation = 'amco_canteen',
   } = options;
 
   const inserted = await db
     .prepare(
-      `INSERT INTO employees (amco_id, full_name, department, section, roster_type, is_active, role_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO employees
+         (amco_id, full_name, department, section, roster_type, is_active, role_id, default_location)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .bind(amcoId, fullName, department, section, rosterType, isActive ? 1 : 0, roleId)
+    .bind(amcoId, fullName, department, section, rosterType, isActive ? 1 : 0, roleId, defaultLocation)
     .run();
 
   const id = inserted.meta.last_row_id as number;

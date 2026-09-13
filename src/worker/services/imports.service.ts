@@ -56,10 +56,37 @@ export interface ValidationOutcome {
 
 /** The shape `import_batches.validation_summary` holds. No schema change: the
  * column is already JSON text, and an older summary simply has no `sheet`. */
+/**
+ * How many rows will do what, across the WHOLE batch.
+ *
+ * Computed here rather than by the client, because the preview endpoint returns
+ * at most MAX_PREVIEW_ROWS rows. A client counting the rows it received reports
+ * the first page, not the file: a 253-row import showed "86 new" because 86 of
+ * the first 100 staged rows were creations. These counts cover every row.
+ */
+export interface ActionCounts {
+  CREATE: number;
+  UPDATE: number;
+  UNCHANGED: number;
+  INVALID: number;
+}
+
 export interface ValidationSummary {
   fileMessages?: string[];
   implemented?: boolean;
   sheet?: ValidationSheet;
+  actionCounts?: ActionCounts;
+}
+
+/** Tally the per-row actions an importer staged. */
+export function countActions(rows: StagedRowInput[]): ActionCounts {
+  const counts: ActionCounts = { CREATE: 0, UPDATE: 0, UNCHANGED: 0, INVALID: 0 };
+  for (const row of rows) {
+    const action = (row.preview as { action?: string } | undefined)?.action;
+    if (action && action in counts) counts[action as keyof ActionCounts] += 1;
+    else if (row.status === 'invalid') counts.INVALID += 1;
+  }
+  return counts;
 }
 
 /** Read a batch's stored summary, tolerating anything unparseable. */
@@ -207,6 +234,7 @@ export async function validateImport(
   await saveValidationResults(db, batchId, outcome.rows, {
     fileMessages: outcome.fileMessages,
     implemented: true,
+    actionCounts: countActions(outcome.rows),
     ...(outcome.sheet ? { sheet: outcome.sheet } : {}),
   } satisfies ValidationSummary);
 

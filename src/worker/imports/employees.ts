@@ -17,6 +17,14 @@ import type { D1Database } from '@cloudflare/workers-types';
 import { normalizeCell, normalizeHeader, readWorksheet, XlsxError } from '../lib/xlsx.js';
 import type { ImportBatch, StagedRowInput } from '../repositories/imports.repo.js';
 import type { ValidationOutcome } from '../services/imports.service.js';
+import { validatePassword } from '../lib/password.js';
+import {
+  DEFAULT_MEAL_LOCATION,
+  MEAL_LOCATIONS,
+  MEAL_LOCATION_LABELS,
+  parseMealLocation,
+  type MealLocation,
+} from '../../shared/types/index.js';
 
 /** The worksheet the real employee workbook uses. */
 export const EMPLOYEE_SHEET_NAME = 'All Employees';
@@ -38,6 +46,8 @@ const COLUMN_ALIASES: Record<string, string[]> = {
   department: ['department', 'dept'],
   section: ['section'],
   roster_type: ['roster', 'roster type', 'roster_type'],
+  default_location: ['location', 'canteen', 'default location', 'default_location', 'meal location'],
+  password: ['password', 'initial password', 'temporary password'],
 };
 
 /** Columns that must be present for the file to be readable at all. */
@@ -67,6 +77,18 @@ export interface EmployeePreview {
   department: string | null;
   section: string | null;
   roster_type: RosterType | null;
+  /** Where this employee will normally collect their meal. */
+  default_location: MealLocation | null;
+  /**
+   * Whether the workbook supplied a password for this row.
+   *
+   * A FLAG, never the password. Previews are persisted in
+   * `import_batch_rows.preview_json`, so putting the plaintext here would store
+   * credentials in the database - which is exactly what must never happen. The
+   * password itself is applied in a separate step that reads the workbook again
+   * in the browser; see `docs/` and the import screen.
+   */
+  password_supplied?: boolean;
   /** For an UPDATE, the fields that differ, with current and incoming values. */
   changes?: Array<{ field: string; from: string | null; to: string | null }>;
 }
@@ -78,6 +100,7 @@ interface ExistingEmployee {
   department: string | null;
   section: string | null;
   roster_type: RosterType;
+  default_location: MealLocation;
 }
 
 /**
@@ -101,7 +124,7 @@ async function loadExistingByAmcoId(
     const placeholders = chunk.map(() => '?').join(', ');
     const result = await db
       .prepare(
-        `SELECT id, amco_id, full_name, department, section, roster_type
+        `SELECT id, amco_id, full_name, department, section, roster_type, default_location
          FROM employees WHERE amco_id IN (${placeholders})`
       )
       .bind(...chunk)
@@ -122,6 +145,12 @@ interface ParsedRow {
   department: string;
   section: string;
   rosterRaw: string;
+  locationRaw: string;
+  /**
+   * Present only while this row is being validated, and never copied into the
+   * preview that gets written to the database.
+   */
+  password: string;
 }
 
 /**
@@ -219,15 +248,22 @@ export async function validateEmployeeWorkbook(
     const department = cell(row, 'department');
     const section = cell(row, 'section');
     const rosterRaw = cell(row, 'roster_type');
+    const locationRaw = cell(row, 'default_location');
+    // NOT normalized: a password is used exactly as typed, spaces included.
+    const passwordIndex = columnOf.get('password');
+    const password = passwordIndex === undefined ? '' : (row.cells.get(passwordIndex) ?? '');
 
     // A completely blank row is skipped silently: trailing blanks are normal in
     // a hand-maintained workbook and are not an error.
-    if (!amcoId && !fullName && !department && !section && !rosterRaw) {
+    if (!amcoId && !fullName && !department && !section && !rosterRaw && !locationRaw && !password) {
       blankRows += 1;
       continue;
     }
 
-    parsed.push({ rowNumber: row.rowNumber, amcoId, fullName, department, section, rosterRaw });
+    parsed.push({
+      rowNumber: row.rowNumber, amcoId, fullName, department, section, rosterRaw,
+      locationRaw, password,
+    });
   }
 
   if (blankRows > 0) {
@@ -291,6 +327,32 @@ export async function validateEmployeeWorkbook(
       }
     }
 
+    // Location: optional. Blank means "use the system default"; an
+    // unrecognised value is REFUSED rather than defaulted, because silently
+    // sending someone to the wrong canteen is a worse outcome than a rejected
+    // row an administrator can see and fix.
+    let location: MealLocation | null = null;
+    if (row.locationRaw) {
+      location = parseMealLocation(row.locationRaw);
+      if (!location) {
+        errors.push(
+          `Location "${row.locationRaw}" is not a canteen. Use one of: ` +
+            `${MEAL_LOCATIONS.map((l) => MEAL_LOCATION_LABELS[l]).join(', ')}.`
+        );
+      }
+    }
+
+    // Password: optional. Validated by the SHARED policy so the workbook cannot
+    // introduce a credential weaker than any other path would accept. The value
+    // itself never leaves this loop.
+    if (row.password) {
+      const check = validatePassword(row.password);
+      if (!check.valid) {
+        // Names the rule, never the value.
+        errors.push(`Password: ${check.error}.`);
+      }
+    }
+
     if (errors.length > 0) {
       const invalid: EmployeePreview = {
         action: 'INVALID',
@@ -299,6 +361,7 @@ export async function validateEmployeeWorkbook(
         department: row.department || null,
         section: row.section || null,
         roster_type: rosterType,
+        default_location: location,
       };
       staged.push({
         rowNumber: row.rowNumber,
@@ -315,16 +378,28 @@ export async function validateEmployeeWorkbook(
       department: row.department || null,
       section: row.section || null,
       roster_type: rosterType as RosterType,
+      // Blank leaves an existing employee's location alone; a new employee
+      // takes the system default.
+      default_location: location ?? current?.default_location ?? DEFAULT_MEAL_LOCATION,
     };
 
+    // A FLAG only. The plaintext is deliberately not carried into the preview,
+    // which is persisted to D1.
+    const passwordFlag = row.password ? { password_supplied: true } : {};
+
     if (!current) {
-      const created: EmployeePreview = { action: 'CREATE', amco_id: row.amcoId, ...incoming };
+      const created: EmployeePreview = {
+        action: 'CREATE',
+        amco_id: row.amcoId,
+        ...incoming,
+        ...passwordFlag,
+      };
       staged.push({ rowNumber: row.rowNumber, status: 'valid', preview: created });
       continue;
     }
 
     const changes: NonNullable<EmployeePreview['changes']> = [];
-    for (const field of ['full_name', 'department', 'section', 'roster_type'] as const) {
+    for (const field of ['full_name', 'department', 'section', 'roster_type', 'default_location'] as const) {
       const from = current[field] ?? null;
       const to = incoming[field] ?? null;
       if (from !== to) changes.push({ field, from, to });
@@ -336,6 +411,7 @@ export async function validateEmployeeWorkbook(
       action: changes.length === 0 ? 'UNCHANGED' : 'UPDATE',
       amco_id: row.amcoId,
       ...incoming,
+      ...passwordFlag,
       ...(changes.length > 0 ? { changes } : {}),
     };
     staged.push({ rowNumber: row.rowNumber, status: 'valid', preview: updated });
@@ -389,15 +465,17 @@ export async function commitEmployeeWorkbook(db: D1Database, batch: ImportBatch)
       statements.push(
         db
           .prepare(
-            `INSERT INTO employees (amco_id, full_name, department, section, roster_type)
-             VALUES (?, ?, ?, ?, ?)`
+            `INSERT INTO employees
+               (amco_id, full_name, department, section, roster_type, default_location)
+             VALUES (?, ?, ?, ?, ?, ?)`
           )
           .bind(
             preview.amco_id,
             preview.full_name,
             preview.department,
             preview.section,
-            preview.roster_type
+            preview.roster_type,
+            preview.default_location ?? DEFAULT_MEAL_LOCATION
           )
       );
     } else {
@@ -409,7 +487,7 @@ export async function commitEmployeeWorkbook(db: D1Database, batch: ImportBatch)
           .prepare(
             `UPDATE employees
              SET full_name = ?, department = ?, section = ?, roster_type = ?,
-                 updated_at = datetime('now')
+                 default_location = ?, updated_at = datetime('now')
              WHERE amco_id = ?`
           )
           .bind(
@@ -417,6 +495,7 @@ export async function commitEmployeeWorkbook(db: D1Database, batch: ImportBatch)
             preview.department,
             preview.section,
             preview.roster_type,
+            preview.default_location ?? DEFAULT_MEAL_LOCATION,
             preview.amco_id
           )
       );

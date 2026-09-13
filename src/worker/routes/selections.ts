@@ -7,6 +7,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types/env.js';
 import { requireAuth, requireRole } from '../middleware/session.js';
 import { getSelectionByEmployeeAndDate, getSelectionsByDate, upsertSelection, adminOverrideSelection, getSelectionHistory } from '../repositories/selections.repo.js';
+import { isMealLocation, MEAL_LOCATIONS, type MealLocation } from '../../shared/types/index.js';
 import { getEligibilityWithNextDate } from '../services/eligibility.service.js';
 import { isCutoffPassed } from '../services/settings.service.js';
 import { getMenuDayByDate } from '../repositories/menu.repo.js';
@@ -43,7 +44,7 @@ app.post('/me', requireAuth, async (c) => {
   const ipAddress = c.req.header('X-Forwarded-For') || null;
   
   const body = await c.req.json();
-  const { meal_date, choice } = body;
+  const { meal_date, choice, pickup_location } = body;
   
   // Validation
   if (!meal_date || !/^\d{4}-\d{2}-\d{2}$/.test(meal_date)) {
@@ -53,6 +54,21 @@ app.post('/me', requireAuth, async (c) => {
   const validChoices = ['option_1', 'option_2', 'no_preference'];
   if (!choice || !validChoices.includes(choice)) {
     return c.json({ success: false, error: `choice must be one of: ${validChoices.join(', ')}` }, 400);
+  }
+
+  // Where the meal is collected. Optional: omitting it keeps whatever the
+  // selection already had, or falls back to the employee's own default. An
+  // unrecognised value is REFUSED rather than quietly defaulted - sending a
+  // portion to the wrong canteen is worse than asking again.
+  let location: MealLocation | undefined;
+  if (pickup_location !== undefined && pickup_location !== null) {
+    if (!isMealLocation(pickup_location)) {
+      return c.json(
+        { success: false, error: `pickup_location must be one of: ${MEAL_LOCATIONS.join(', ')}` },
+        400
+      );
+    }
+    location = pickup_location;
   }
   
   // Get employee details
@@ -96,7 +112,8 @@ app.post('/me', requireAuth, async (c) => {
       'employee',
       null,
       null,
-      ipAddress
+      ipAddress,
+      location
     );
     
     // `changed: false` means the employee re-submitted the choice they already

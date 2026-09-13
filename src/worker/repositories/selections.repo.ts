@@ -4,7 +4,14 @@
  */
 
 import type { D1Database } from '@cloudflare/workers-types';
-import type { LunchSelection, LunchChoice, SelectionSource, LunchSelectionHistory } from '../../shared/types/index.js';
+import type {
+  LunchSelection,
+  LunchChoice,
+  SelectionSource,
+  LunchSelectionHistory,
+  MealLocation,
+} from '../../shared/types/index.js';
+import { DEFAULT_MEAL_LOCATION } from '../../shared/types/index.js';
 
 export interface SelectionMutationResult {
   selection: LunchSelection;
@@ -60,6 +67,23 @@ export async function getSelectionsByDate(
 }
 
 /**
+ * The canteen this employee normally uses.
+ *
+ * Falls back to the system default only if the employee row has somehow gone -
+ * a selection must always carry a location the kitchen can act on.
+ */
+export async function getEmployeeDefaultLocation(
+  db: D1Database,
+  employeeId: number
+): Promise<MealLocation> {
+  const row = await db
+    .prepare('SELECT default_location FROM employees WHERE id = ?')
+    .bind(employeeId)
+    .first<{ default_location: MealLocation }>();
+  return row?.default_location ?? DEFAULT_MEAL_LOCATION;
+}
+
+/**
  * Create or update an employee's lunch selection.
  *
  * Three cases:
@@ -68,11 +92,11 @@ export async function getSelectionsByDate(
  *   C) Existing, identical intent -> NOTHING IS WRITTEN
  *
  * Case C is a true no-op: no UPDATE, so `updated_at` is untouched, and no
- * history row. "Identical intent" means the choice, the source, and the override
- * reason all match what is already stored - so an employee tapping the same
- * option twice does nothing, while an admin re-issuing an override with a
- * DIFFERENT reason is still recorded, because that is a genuine, auditable
- * change to why the row looks the way it does.
+ * history row. "Identical intent" means the choice, the LOCATION, the source,
+ * and the override reason all match what is already stored - so an employee
+ * tapping the same option twice does nothing, while changing only where they
+ * will collect it IS a change, because the kitchen has to send a portion
+ * somewhere else.
  */
 export async function upsertSelection(
   db: D1Database,
@@ -82,17 +106,32 @@ export async function upsertSelection(
   source: SelectionSource = 'employee',
   setBy: number | null = null,
   overrideReason: string | null = null,
-  ipAddress: string | null = null
+  ipAddress: string | null = null,
+  /**
+   * Where the meal will be collected. Omitted means "leave it as it is" for an
+   * existing selection, and "use the employee's default" for a new one - so a
+   * caller that does not care about location can never blank one out.
+   */
+  pickupLocation?: MealLocation
 ): Promise<SelectionMutationResult> {
   // Get existing selection for history
   const existing = await getSelectionByEmployeeAndDate(db, employeeId, mealDate);
   const beforeJson = existing ? JSON.stringify(existing) : null;
   const previousChoice = existing?.choice ?? null;
+  const previousLocation = existing?.pickup_location ?? null;
+
+  // Resolve the location once: an explicit value wins, then whatever the
+  // selection already had, then the employee's own default.
+  const location: MealLocation =
+    pickupLocation ??
+    existing?.pickup_location ??
+    (await getEmployeeDefaultLocation(db, employeeId));
 
   // Case C: identical submission. Touch nothing and return what is already there.
   if (
     existing &&
     existing.choice === choice &&
+    existing.pickup_location === location &&
     existing.source === source &&
     (existing.override_reason ?? null) === overrideReason
   ) {
@@ -110,18 +149,20 @@ export async function upsertSelection(
     await db
       .prepare(`
         UPDATE lunch_selections
-        SET choice = ?, source = ?, set_by = ?, override_reason = ?, updated_at = datetime('now')
+        SET choice = ?, pickup_location = ?, source = ?, set_by = ?, override_reason = ?,
+            updated_at = datetime('now')
         WHERE employee_id = ? AND meal_date = ?
       `)
-      .bind(choice, source, setBy, overrideReason, employeeId, mealDate)
+      .bind(choice, location, source, setBy, overrideReason, employeeId, mealDate)
       .run();
   } else {
     await db
       .prepare(`
-        INSERT INTO lunch_selections (employee_id, meal_date, choice, source, set_by, override_reason)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO lunch_selections
+          (employee_id, meal_date, choice, pickup_location, source, set_by, override_reason)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       `)
-      .bind(employeeId, mealDate, choice, source, setBy, overrideReason)
+      .bind(employeeId, mealDate, choice, location, source, setBy, overrideReason)
       .run();
   }
   
@@ -135,10 +176,14 @@ export async function upsertSelection(
   const historyResult = await db
     .prepare(`
       INSERT INTO lunch_selection_history 
-        (employee_id, meal_date, previous_choice, new_choice, changed_by, source, override_reason, ip_address)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        (employee_id, meal_date, previous_choice, new_choice, previous_location, new_location,
+         changed_by, source, override_reason, ip_address)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
-    .bind(employeeId, mealDate, previousChoice, choice, setBy, source, overrideReason, ipAddress)
+    .bind(
+      employeeId, mealDate, previousChoice, choice, previousLocation, location,
+      setBy, source, overrideReason, ipAddress
+    )
     .run();
   
   const historyRecord: LunchSelectionHistory = {
@@ -147,6 +192,8 @@ export async function upsertSelection(
     meal_date: mealDate,
     previous_choice: previousChoice,
     new_choice: choice,
+    previous_location: previousLocation,
+    new_location: location,
     changed_at: new Date().toISOString(),
     changed_by: setBy,
     source: source,

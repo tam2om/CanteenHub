@@ -23,6 +23,8 @@ export interface Employee {
   section: string | null;
   roster_type: RosterType;
   is_active: boolean;
+  /** Where this employee normally collects their meal. */
+  default_location: MealLocation;
   created_at: string;
   updated_at: string;
 }
@@ -93,11 +95,56 @@ export interface MenuDayWithDetails extends MenuDay {
 export type LunchChoice = 'option_1' | 'option_2' | 'no_preference';
 export type SelectionSource = 'employee' | 'admin_override' | 'system';
 
+/**
+ * Where a meal is collected.
+ *
+ * The codes are stored; the labels are what people read. Both live here so the
+ * worker, the portal and the Excel export all name a canteen the same way -
+ * a report that says "omco_canteen" to a kitchen manager is a report nobody
+ * uses.
+ */
+export const MEAL_LOCATIONS = ['amco_canteen', 'omco_canteen', 'whc_canteen'] as const;
+export type MealLocation = (typeof MEAL_LOCATIONS)[number];
+
+export const MEAL_LOCATION_LABELS: Record<MealLocation, string> = {
+  amco_canteen: 'AMCO Canteen',
+  omco_canteen: 'OMCO Canteen',
+  whc_canteen: 'WHC Canteen',
+};
+
+/** The location a new employee gets when no other is stated. */
+export const DEFAULT_MEAL_LOCATION: MealLocation = 'amco_canteen';
+
+export function isMealLocation(value: unknown): value is MealLocation {
+  return typeof value === 'string' && (MEAL_LOCATIONS as readonly string[]).includes(value);
+}
+
+/**
+ * Read a location written by a person - an import cell, or an API caller.
+ * Accepts the stored code, the printed label, and the bare site name, because
+ * all three turn up in real spreadsheets. Returns null for anything else rather
+ * than guessing a canteen, which would send food to the wrong site.
+ */
+export function parseMealLocation(value: unknown): MealLocation | null {
+  if (typeof value !== 'string') return null;
+  const key = value.trim().toLowerCase().replace(/[\s_-]+/g, ' ');
+  if (!key) return null;
+  for (const location of MEAL_LOCATIONS) {
+    const site = location.replace('_canteen', '');
+    if (key === location.replace(/_/g, ' ') || key === site || key === `${site} canteen`) {
+      return location;
+    }
+  }
+  return null;
+}
+
 export interface LunchSelection {
   id: number;
   employee_id: number;
   meal_date: string; // YYYY-MM-DD
   choice: LunchChoice;
+  /** Where this meal, on this date, is collected. */
+  pickup_location: MealLocation;
   source: SelectionSource;
   set_by: number | null; // employee_id of admin who made override
   override_reason: string | null;
@@ -111,6 +158,8 @@ export interface LunchSelectionHistory {
   meal_date: string;
   previous_choice: LunchChoice | null;
   new_choice: LunchChoice;
+  previous_location: MealLocation | null;
+  new_location: MealLocation | null;
   changed_at: string;
   changed_by: number | null;
   source: SelectionSource;

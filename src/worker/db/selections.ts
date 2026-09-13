@@ -60,6 +60,10 @@ export async function upsertLunchSelection(
       meal_date: mealDate,
       previous_choice: existing.choice,
       new_choice: choice,
+      // This layer does not change where a meal is collected, so the location
+      // is carried through unchanged rather than recorded as a change.
+      previous_location: existing.pickup_location ?? null,
+      new_location: existing.pickup_location ?? null,
       changed_by: setBy,
       source: source,
       override_reason: overrideReason ?? null,
