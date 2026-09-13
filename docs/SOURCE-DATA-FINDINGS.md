@@ -25,12 +25,30 @@ described and the importer's own response:
   group cells;
 - rows 4–33 carry 1–30 September.
 
-Both of those shapes were rejected by the importer as originally written, and
-both are now handled — see `ARCHITECTURE.md` §13 and
-`src/worker/imports/menuSheet.ts`. **The real workbook itself remains
-unvalidated**: the fix is verified against a sanitized fixture reproducing this
-structure, not against the file, which has never been read by this repository's
-tests or by anyone working on them.
+**Verified against the real file on 2026-09-13.** The workbook was supplied and
+run through the real HTTP API end to end. It now imports: **30 menu days, 60
+options, 150 components, 1–30 September 2026, zero invalid rows.** The file is
+NOT in this repository and was read from outside it by a throwaway test that was
+deleted afterwards.
+
+Three things the real file corrected about the description above:
+
+1. Its worksheet is named **`Lunch`**, not `Page 1` — it had been renamed since
+   the failed production upload. The candidate path therefore does not apply to
+   this particular file; it takes the named path. The candidate path still
+   matters for the file as it was uploaded.
+2. The dates are **text** (`1-Sep-26`), not Excel serials, and the header band is
+   merged exactly as described: `A1:I1`, `A2:A3`, `B2:B3`, `C2:D2` ("Lunch
+   Menu"), `E2:F2` ("Option per Person"), `G2:G3`, `H2:H3`, `I2:I3`. Dimension
+   `A1:I33` — 1 title + 2 header + 30 data rows, no stray rows or columns.
+3. **A second, independent defect was only discoverable from the real file**: the
+   XLSX reader mis-parsed Excel's empty-but-styled cells. See
+   `ARCHITECTURE.md` decision 34.
+
+An earlier attachment of the same name was a **legacy `.xls` (OLE2) saved with an
+`.xlsx` extension**; the upload gate refuses it with "This looks like a legacy
+.xls workbook. Save it as .xlsx and upload again," which is correct behaviour and
+needed no change.
 
 Files examined:
 
