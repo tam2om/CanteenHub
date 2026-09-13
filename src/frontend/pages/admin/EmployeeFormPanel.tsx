@@ -9,11 +9,18 @@
 import { useState, type FormEvent } from 'react';
 import { useCreateEmployee, useUpdateEmployee } from '../../hooks/useAdmin.js';
 import { ApiError } from '../../api/client.js';
+import { useSession } from '../../hooks/useSession.js';
 import type {
   AdminEmployee,
   CreateEmployeeInput,
+  MealLocation,
   RosterType,
   UpdateEmployeeInput,
+} from '../../types/index.js';
+import {
+  DEFAULT_MEAL_LOCATION,
+  MEAL_LOCATIONS,
+  MEAL_LOCATION_LABELS,
 } from '../../types/index.js';
 
 interface Props {
@@ -36,6 +43,12 @@ export function EmployeeFormPanel({ mode, employee, onClose }: Props) {
   const [department, setDepartment] = useState(employee?.department ?? '');
   const [section, setSection] = useState(employee?.section ?? '');
   const [rosterType, setRosterType] = useState<RosterType>(employee?.roster_type ?? 'regular');
+  const [location, setLocation] = useState<MealLocation>(
+    employee?.default_location ?? DEFAULT_MEAL_LOCATION
+  );
+  const [roleId, setRoleId] = useState<number>(employee?.role_id ?? 1);
+  const { user } = useSession();
+  const isSuperAdmin = user?.role === 'super_admin';
   const [clientError, setClientError] = useState<string | null>(null);
 
   const create = useCreateEmployee();
@@ -64,6 +77,11 @@ export function EmployeeFormPanel({ mode, employee, onClose }: Props) {
         department: department.trim() || null,
         section: section.trim() || null,
         roster_type: rosterType,
+        default_location: location,
+        // Sent only when it actually changes, so an administrator editing a
+        // name never re-asserts a role - and the server's super-administrator
+        // guard is never triggered by an edit that was not about roles.
+        ...(roleId !== (employee.role_id ?? 1) ? { role_id: roleId } : {}),
       };
       update.mutate({ id: employee.id, input }, { onSuccess: onClose });
       return;
@@ -75,6 +93,8 @@ export function EmployeeFormPanel({ mode, employee, onClose }: Props) {
       department: department.trim() || null,
       section: section.trim() || null,
       roster_type: rosterType,
+      default_location: location,
+      ...(roleId !== 1 ? { role_id: roleId } : {}),
     };
     create.mutate(input, { onSuccess: onClose });
   };
@@ -148,6 +168,44 @@ export function EmployeeFormPanel({ mode, employee, onClose }: Props) {
               </option>
             ))}
           </select>
+        </label>
+
+        <label className="field">
+          <span className="field__label">Default canteen</span>
+          <select
+            className="field__input"
+            name="default_location"
+            value={location}
+            onChange={(e) => setLocation(e.target.value as MealLocation)}
+          >
+            {MEAL_LOCATIONS.map((value) => (
+              <option key={value} value={value}>
+                {MEAL_LOCATION_LABELS[value]}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {/* Role. The super administrator option is offered only to a super
+            administrator - and the SERVER refuses it regardless of what this
+            form sends, which is what actually enforces the rule. */}
+        <label className="field">
+          <span className="field__label">Role</span>
+          <select
+            className="field__input"
+            name="role_id"
+            value={roleId}
+            onChange={(e) => setRoleId(Number(e.target.value))}
+          >
+            <option value={1}>Employee</option>
+            <option value={2}>Administrator</option>
+            {(isSuperAdmin || roleId === 3) && <option value={3}>Super administrator</option>}
+          </select>
+          {!isSuperAdmin && (
+            <span className="field__hint">
+              Only a super administrator can grant the super administrator role.
+            </span>
+          )}
         </label>
 
         {(clientError || serverError) && (

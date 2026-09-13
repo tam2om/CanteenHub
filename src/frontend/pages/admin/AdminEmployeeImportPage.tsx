@@ -17,6 +17,7 @@ import {
   useValidateImport,
 } from '../../hooks/useImports.js';
 import { ApiError } from '../../api/client.js';
+import { ImportPasswordStep } from './ImportPasswordStep.js';
 import { EmptyState, ErrorState, LoadingState } from '../../components/States.js';
 import { ConfirmDialog } from '../../components/ConfirmDialog.js';
 import type { ImportDetail, ImportPreviewRow } from '../../types/index.js';
@@ -102,7 +103,15 @@ export function AdminEmployeeImportPage() {
 
   const current = detail.data;
   const rows = current?.preview_rows ?? [];
-  const counts = countByAction(rows);
+  // The SERVER's tallies cover every row. `countByAction(rows)` counts only the
+  // rows this page received, and `preview_rows` is capped at
+  // `preview_row_limit` - which is how a 253-row import once reported "86 new".
+  // The fallback exists only for a batch validated before the server sent
+  // counts at all.
+  const counts =
+    current?.action_counts ??
+    (validateMutation.data as ImportDetail | undefined)?.action_counts ??
+    countByAction(rows);
   const summaryMessages =
     (validateMutation.data as ImportDetail & { messages?: string[] } | undefined)?.messages ?? [];
 
@@ -354,6 +363,8 @@ export function AdminEmployeeImportPage() {
       )}
 
       {/* ---------------- step 5: result ---------------- */}
+      {committed && file && <ImportPasswordStep file={file} />}
+
       {committed && (
         <section className="card">
           <h2 className="card__title">Import complete</h2>

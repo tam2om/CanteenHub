@@ -4,7 +4,13 @@
  */
 
 import { api } from './client.js';
-import type { HistoryPayload, LunchChoice, SessionUser, TodayPayload } from '../types/index.js';
+import type {
+  HistoryPayload,
+  LunchChoice,
+  MealLocation,
+  SessionUser,
+  TodayPayload,
+} from '../types/index.js';
 
 export const login = (amcoId: string, password: string) =>
   api.post<{ employee: SessionUser }>('/api/auth/login', {
@@ -40,5 +46,16 @@ export const fetchToday = (date?: string) =>
 export const fetchHistory = (limit = 30, offset = 0) =>
   api.get<HistoryPayload>(`/api/me/selections/history?limit=${limit}&offset=${offset}`);
 
-export const submitSelection = (mealDate: string, choice: LunchChoice) =>
-  api.post<unknown>('/api/selections/me', { meal_date: mealDate, choice });
+export const submitSelection = (
+  mealDate: string,
+  choice: LunchChoice,
+  pickupLocation?: MealLocation
+) =>
+  api.post<unknown>('/api/selections/me', {
+    meal_date: mealDate,
+    choice,
+    // Omitted rather than sent as null when unchanged: the server then keeps
+    // whatever the selection already had, or falls back to the employee's own
+    // default. A null would be a value, and would have to mean something.
+    ...(pickupLocation ? { pickup_location: pickupLocation } : {}),
+  });

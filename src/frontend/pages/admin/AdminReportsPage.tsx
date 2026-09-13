@@ -123,6 +123,59 @@ function ReportBody({ report }: { report: LunchReport }) {
         </p>
       </section>
 
+      {/* ---------------- per canteen ---------------- */}
+      {report.by_location && report.by_location.length > 0 && (
+        <section className="card">
+          <h2 className="card__title">Portions per canteen</h2>
+          <p className="panel__note">
+            Where each portion is to be collected. This is the number each kitchen dispatches on.
+          </p>
+          <div className="table-scroll">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th scope="col">Canteen</th>
+                  <th scope="col">Option 1</th>
+                  <th scope="col">Option 2</th>
+                  <th scope="col">No preference</th>
+                  <th scope="col">Total</th>
+                  <th scope="col">Eligible, not selected</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.by_location.map((row) => (
+                  <tr key={row.location}>
+                    <th scope="row">{row.label}</th>
+                    <td>{row.option_1}</td>
+                    <td>{row.option_2}</td>
+                    <td>{row.no_preference}</td>
+                    <td>
+                      <strong>{row.total}</strong>
+                    </td>
+                    <td>{row.eligible_not_selected}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* A plain link, not a scripted download: the browser fetches the
+              endpoint with the session cookie and saves what it is given. */}
+          <div className="panel__actions">
+            <a
+              className="button button--primary button--inline"
+              href={`/api/admin/reports/lunch.xlsx?date=${encodeURIComponent(report.date)}`}
+            >
+              Download Excel report
+            </a>
+          </div>
+          <p className="panel__note">
+            The workbook has two sheets: <strong>Totals</strong> per canteen, and{' '}
+            <strong>Detail</strong> listing every employee behind those numbers.
+          </p>
+        </section>
+      )}
+
       {/* ---------------- totals ---------------- */}
       <section className="card">
         <h2 className="card__title">Who was considered</h2>

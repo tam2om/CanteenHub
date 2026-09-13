@@ -3,7 +3,8 @@
  */
 
 import type { D1Database } from '@cloudflare/workers-types';
-import type { Employee } from '../../shared/types/index.js';
+import type { Employee, MealLocation } from '../../shared/types/index.js';
+import { DEFAULT_MEAL_LOCATION } from '../../shared/types/index.js';
 
 export interface EmployeeDB extends Employee {
   role_id: number;
@@ -58,16 +59,22 @@ export async function createEmployee(
     section?: string | null;
     roster_type: 'regular' | 'shift' | 'amman_hq';
     role_id?: number;
+    default_location?: MealLocation;
   }
 ): Promise<EmployeeDB> {
   const roleId = data.role_id ?? 1; // Default to employee role
-  
+  const location = data.default_location ?? DEFAULT_MEAL_LOCATION;
+
   const result = await db
     .prepare(`
-      INSERT INTO employees (amco_id, full_name, department, section, roster_type, role_id)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO employees
+        (amco_id, full_name, department, section, roster_type, role_id, default_location)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `)
-    .bind(data.amco_id, data.full_name, data.department ?? null, data.section ?? null, data.roster_type, roleId)
+    .bind(
+      data.amco_id, data.full_name, data.department ?? null, data.section ?? null,
+      data.roster_type, roleId, location
+    )
     .run();
   
   return getEmployeeById(db, result.meta.last_row_id as number) as Promise<EmployeeDB>;
@@ -86,6 +93,7 @@ export async function updateEmployee(
     roster_type: 'regular' | 'shift' | 'amman_hq';
     is_active: boolean;
     role_id: number;
+    default_location: MealLocation;
   }>
 ): Promise<EmployeeDB | null> {
   const updates: string[] = [];
@@ -106,6 +114,10 @@ export async function updateEmployee(
   if (data.roster_type !== undefined) {
     updates.push('roster_type = ?');
     binds.push(data.roster_type);
+  }
+  if (data.default_location !== undefined) {
+    updates.push('default_location = ?');
+    binds.push(data.default_location);
   }
   if (data.is_active !== undefined) {
     updates.push('is_active = ?');

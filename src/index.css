@@ -283,6 +283,9 @@ body {
 .field--inline { flex: 1 1 12rem; margin-bottom: 0; }
 /* Checkbox beside its label, wrapping on a narrow screen rather than
    overflowing - the label is a full sentence, not a word. */
+/* The pickup-canteen select sits under the meal buttons; it is a full-width
+   field on its own line so the label and the choice read as one statement. */
+.field--location { margin-top: 1rem; max-width: 22rem; }
 .field--check {
   display: flex; align-items: flex-start; gap: 0.5rem;
   margin-bottom: 0; font-weight: 600;

@@ -26,7 +26,9 @@ import { validatePassword } from '../lib/password.js';
 import { toPublicEmployee, toPublicEmployees } from '../lib/employeeView.js';
 import { isValidBusinessDate } from '../lib/datetime.js';
 import { getAllSettings, getCurrentBusinessDate, getSetting, updateSetting } from '../services/settings.service.js';
-import { buildLunchReport } from '../services/reports.service.js';
+import { buildLunchReport, buildLunchReportDetail } from '../services/reports.service.js';
+import { isMealLocation, MEAL_LOCATIONS } from '../../shared/types/index.js';
+import { buildXlsx, XLSX_CONTENT_TYPE, type CellValue } from '../lib/xlsxWrite.js';
 import { listHolidays, upsertHoliday, deleteHoliday } from '../repositories/holidays.repo.js';
 import {
   logEmployeeChange,
@@ -46,6 +48,41 @@ const CUTOFF_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
 const clientIp = (c: { req: { header: (n: string) => string | undefined } }) =>
   c.req.header('X-Forwarded-For') || null;
+
+/** roles.id, as seeded by migration 0001. */
+const ROLE_SUPER_ADMIN = 3;
+
+/**
+ * Only a super administrator may create one, or change one.
+ *
+ * WHY THIS EXISTS: the role was previously settable by any administrator, which
+ * meant `admin` and `super_admin` were the same privilege in practice - any
+ * admin could promote themselves and hold the top role permanently. Both
+ * directions are guarded: granting the role, and altering the role of someone
+ * who already holds it, because stripping a super administrator is the other
+ * half of the same power.
+ *
+ * Returns an error message when the action is refused, or null when allowed.
+ */
+function refuseSuperAdminChange(
+  actorRole: string,
+  requestedRoleId: number | undefined,
+  targetCurrentRoleId: number | null
+): string | null {
+  if (actorRole === 'super_admin') return null;
+
+  if (requestedRoleId === ROLE_SUPER_ADMIN) {
+    return 'Only a super administrator can grant the super administrator role.';
+  }
+  if (
+    targetCurrentRoleId === ROLE_SUPER_ADMIN &&
+    requestedRoleId !== undefined &&
+    requestedRoleId !== ROLE_SUPER_ADMIN
+  ) {
+    return 'Only a super administrator can change a super administrator\'s role.';
+  }
+  return null;
+}
 
 // ============================================================================
 // EMPLOYEES
@@ -97,7 +134,7 @@ app.post('/employees', async (c) => {
   const actorId = c.get('session')!.employee_id;
 
   const body = await c.req.json();
-  const { amco_id, full_name, department, section, roster_type, role_id } = body;
+  const { amco_id, full_name, department, section, roster_type, role_id, default_location } = body;
 
   if (!amco_id || typeof amco_id !== 'string' || amco_id.trim().length === 0) {
     return c.json({ success: false, error: 'amco_id is required' }, 400);
@@ -111,6 +148,15 @@ app.post('/employees', async (c) => {
   if (role_id !== undefined && ![1, 2, 3].includes(role_id)) {
     return c.json({ success: false, error: 'role_id must be 1 (employee), 2 (admin) or 3 (super_admin)' }, 400);
   }
+  if (default_location !== undefined && !isMealLocation(default_location)) {
+    return c.json(
+      { success: false, error: `default_location must be one of: ${MEAL_LOCATIONS.join(', ')}` },
+      400
+    );
+  }
+
+  const refusal = refuseSuperAdminChange(c.get('session')!.role, role_id, null);
+  if (refusal) return c.json({ success: false, error: refusal }, 403);
 
   const trimmedAmcoId = amco_id.trim();
   if (await getEmployeeByAmcoId(db, trimmedAmcoId)) {
@@ -127,6 +173,7 @@ app.post('/employees', async (c) => {
       section: typeof section === 'string' ? section.trim() : null,
       roster_type,
       role_id,
+      default_location,
     });
 
     const publicEmployee = toPublicEmployee(employee);
@@ -163,7 +210,7 @@ app.put('/employees/:id', async (c) => {
   }
 
   const body = await c.req.json();
-  const { full_name, department, section, roster_type, role_id } = body;
+  const { full_name, department, section, roster_type, role_id, default_location } = body;
 
   if (full_name !== undefined && (typeof full_name !== 'string' || full_name.trim().length === 0)) {
     return c.json({ success: false, error: 'full_name cannot be empty' }, 400);
@@ -174,12 +221,21 @@ app.put('/employees/:id', async (c) => {
   if (role_id !== undefined && ![1, 2, 3].includes(role_id)) {
     return c.json({ success: false, error: 'role_id must be 1 (employee), 2 (admin) or 3 (super_admin)' }, 400);
   }
+  if (default_location !== undefined && !isMealLocation(default_location)) {
+    return c.json(
+      { success: false, error: `default_location must be one of: ${MEAL_LOCATIONS.join(', ')}` },
+      400
+    );
+  }
   if (body.is_active !== undefined) {
     return c.json(
       { success: false, error: 'Use PUT /api/admin/employees/:id/status to activate or deactivate' },
       400
     );
   }
+
+  const refusal = refuseSuperAdminChange(c.get('session')!.role, role_id, existing.role_id);
+  if (refusal) return c.json({ success: false, error: refusal }, 403);
 
   const beforeJson = JSON.stringify(toPublicEmployee(existing));
 
@@ -189,6 +245,7 @@ app.put('/employees/:id', async (c) => {
     ...(section !== undefined ? { section: typeof section === 'string' ? section.trim() : null } : {}),
     ...(roster_type !== undefined ? { roster_type } : {}),
     ...(role_id !== undefined ? { role_id } : {}),
+    ...(default_location !== undefined ? { default_location } : {}),
   });
 
   if (!updated) {
@@ -454,6 +511,100 @@ app.get('/reports/lunch', async (c) => {
 
   const report = await buildLunchReport(db, date);
   return c.json({ success: true, data: report });
+});
+
+/**
+ * GET /api/admin/reports/lunch.xlsx?date=YYYY-MM-DD - the same report as a
+ * workbook the kitchen can print.
+ *
+ * TWO SHEETS, because two different people read this:
+ *   "Totals"  - portions per option per canteen. What the kitchen dispatches on.
+ *   "Detail"  - one row per employee behind those numbers, so a disputed count
+ *               can be traced to the people in it.
+ *
+ * Read-only and deliberately unaudited, exactly like the JSON report it mirrors:
+ * exporting changes nothing, and an audit row per export would bury the entries
+ * that record real changes.
+ *
+ * The detail sheet carries names, so this endpoint is admin-only - which it
+ * already is, by the router-level requireRole above.
+ */
+app.get('/reports/lunch.xlsx', async (c) => {
+  const db = c.env.DB;
+  const requested = c.req.query('date');
+
+  if (requested !== undefined && !isValidBusinessDate(requested)) {
+    return c.json({ success: false, error: 'Invalid date. Use YYYY-MM-DD' }, 400);
+  }
+
+  const date = requested ?? (await getCurrentBusinessDate(db));
+  const [report, detail] = await Promise.all([
+    buildLunchReport(db, date),
+    buildLunchReportDetail(db, date),
+  ]);
+
+  const CHOICE_LABELS: Record<string, string> = {
+    option_1: 'Option 1',
+    option_2: 'Option 2',
+    no_preference: 'No preference',
+  };
+
+  const totals: CellValue[][] = [
+    ['Canteen', 'Option 1', 'Option 2', 'No preference', 'Total portions', 'Eligible, not selected'],
+    ...report.by_location.map((row) => [
+      row.label,
+      row.option_1,
+      row.option_2,
+      row.no_preference,
+      row.total,
+      row.eligible_not_selected,
+    ]),
+    [
+      'All canteens',
+      report.selections.option_1,
+      report.selections.option_2,
+      report.selections.no_preference,
+      report.selections.option_1 + report.selections.option_2 + report.selections.no_preference,
+      report.selections.eligible_not_selected,
+    ],
+    [],
+    ['Lunch report', date],
+    ['Timezone', report.timezone],
+    ['Menu', report.menu.exists ? (report.menu.status ?? 'unknown') : 'no menu for this date'],
+    ['Employees considered', report.totals.employees_considered],
+    ['Eligible', report.totals.eligible],
+    ['Not eligible', report.totals.not_eligible],
+    ['Selections held by ineligible employees', report.selections.ineligible_with_selection],
+  ];
+
+  const detailRows: CellValue[][] = [
+    ['AMCO ID', 'Name', 'Department', 'Section', 'Roster', 'Eligible', 'Reason', 'Choice', 'Canteen'],
+    ...detail.map((row) => [
+      row.amco_id,
+      row.full_name,
+      row.department ?? '',
+      row.section ?? '',
+      row.roster_type,
+      row.eligible ? 'Yes' : 'No',
+      row.reason_label,
+      row.choice ? (CHOICE_LABELS[row.choice] ?? row.choice) : '',
+      row.location_label,
+    ]),
+  ];
+
+  const bytes = buildXlsx([
+    { name: 'Totals', rows: totals, columnWidths: [26, 10, 10, 15, 15, 22] },
+    { name: 'Detail', rows: detailRows, columnWidths: [12, 28, 22, 22, 10, 9, 26, 15, 16] },
+  ]);
+
+  return new Response(bytes as unknown as BodyInit, {
+    status: 200,
+    headers: {
+      'Content-Type': XLSX_CONTENT_TYPE,
+      'Content-Disposition': `attachment; filename="canteenhub-lunch-${date}.xlsx"`,
+      'Cache-Control': 'no-store',
+    },
+  });
 });
 
 export { app as adminRoutes };

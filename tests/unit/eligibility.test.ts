@@ -12,6 +12,7 @@ const createEmployee = (overrides: Partial<Employee>): Employee => ({
   id: 1,
   amco_id: 'EMP001',
   full_name: 'Test Employee',
+  default_location: 'amco_canteen',
   department: 'IT',
   section: 'Development',
   roster_type: 'regular',

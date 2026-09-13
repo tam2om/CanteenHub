@@ -122,7 +122,15 @@ export function AdminMenuImportPage() {
 
   const current = detail.data;
   const rows = current?.preview_rows ?? [];
-  const counts = countByAction(rows);
+  // The SERVER's tallies cover every row. `countByAction(rows)` counts only the
+  // rows this page received, and `preview_rows` is capped at
+  // `preview_row_limit` - which is how a 253-row import once reported "86 new".
+  // The fallback exists only for a batch validated before the server sent
+  // counts at all.
+  const counts =
+    current?.action_counts ??
+    (validateMutation.data as ImportDetail | undefined)?.action_counts ??
+    countByAction(rows);
   const summaryMessages = validateMutation.data?.messages ?? [];
 
   // Which worksheet the server read. `candidate` means no sheet was named

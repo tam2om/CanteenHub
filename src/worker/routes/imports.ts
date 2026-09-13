@@ -265,6 +265,9 @@ app.get('/:id', async (c) => {
       })),
       preview_row_limit: MAX_PREVIEW_ROWS,
       sheet: readValidationSummary(batch.validation_summary).sheet ?? null,
+      // Whole-batch tallies. The preview_rows array above is capped, so a
+      // client must never count it to describe the file.
+      action_counts: readValidationSummary(batch.validation_summary).actionCounts ?? null,
     },
   });
 });
@@ -337,6 +340,7 @@ app.post('/:id/validate', async (c) => {
       // Which worksheet produced this preview, and whether the administrator
       // has to confirm it. Absent for imports that do not choose a worksheet.
       sheet: summary.sheet ?? null,
+      action_counts: summary.actionCounts ?? null,
     },
   });
 });

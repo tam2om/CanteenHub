@@ -21,6 +21,15 @@ export type EligibilityReason =
   | 'SHIFT_OFF'
   | 'ROSTER_MISSING';
 
+export {
+  MEAL_LOCATIONS,
+  MEAL_LOCATION_LABELS,
+  DEFAULT_MEAL_LOCATION,
+  isMealLocation,
+} from '../../shared/types/index.js';
+export type { MealLocation } from '../../shared/types/index.js';
+import type { MealLocation } from '../../shared/types/index.js';
+
 export interface Employee {
   id: number;
   amco_id: string;
@@ -29,6 +38,8 @@ export interface Employee {
   section: string | null;
   roster_type: RosterType;
   is_active: boolean | number;
+  /** Where this employee normally collects their meal. */
+  default_location?: MealLocation;
 }
 
 export interface Eligibility {
@@ -64,6 +75,8 @@ export interface Selection {
   id: number;
   meal_date: string;
   choice: LunchChoice;
+  /** Where THIS meal is collected. */
+  pickup_location?: MealLocation;
   source: SelectionSource;
   selected_at: string;
   updated_at: string;
@@ -143,6 +156,7 @@ export interface CreateEmployeeInput {
   section?: string | null;
   roster_type: RosterType;
   role_id?: number;
+  default_location?: MealLocation;
 }
 
 /**
@@ -156,6 +170,7 @@ export interface UpdateEmployeeInput {
   section?: string | null;
   roster_type?: RosterType;
   role_id?: number;
+  default_location?: MealLocation;
 }
 
 /** Response of PUT /api/admin/employees/:id/password - carries no credential. */
@@ -258,6 +273,20 @@ export interface ImportDetail extends ImportBatch {
   sheet?: ImportSheet | null;
   /** Present on the validate response. */
   messages?: string[];
+  /**
+   * Whole-batch tallies from the server.
+   *
+   * ALWAYS prefer these to counting `preview_rows`: that array is capped at
+   * `preview_row_limit`, so counting it describes the first page, not the file.
+   */
+  action_counts?: ImportActionCounts | null;
+}
+
+export interface ImportActionCounts {
+  CREATE: number;
+  UPDATE: number;
+  UNCHANGED: number;
+  INVALID: number;
 }
 
 export interface ImportList {
@@ -345,6 +374,18 @@ export interface LunchReport {
   };
   eligibility: { by_reason: ReportReasonCount[] };
   not_eligible: { by_reason: ReportReasonCount[] };
+  /** Portions per canteen - what the kitchen dispatches on. */
+  by_location?: ReportLocationCount[];
+}
+
+export interface ReportLocationCount {
+  location: MealLocation;
+  label: string;
+  option_1: number;
+  option_2: number;
+  no_preference: number;
+  total: number;
+  eligible_not_selected: number;
 }
 
 // ---------------------------------------------------------------------------

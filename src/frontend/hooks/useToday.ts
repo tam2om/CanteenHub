@@ -8,6 +8,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchToday, submitSelection } from '../api/endpoints.js';
+import type { MealLocation } from '../types/index.js';
 import type { LunchChoice, TodayPayload } from '../types/index.js';
 
 export const TODAY_QUERY_KEY = ['today'] as const;
@@ -24,7 +25,10 @@ export function useSelectMeal(mealDate: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (choice: LunchChoice) => submitSelection(mealDate, choice),
+    mutationFn: (input: LunchChoice | { choice: LunchChoice; pickupLocation?: MealLocation }) =>
+      typeof input === 'string'
+        ? submitSelection(mealDate, input)
+        : submitSelection(mealDate, input.choice, input.pickupLocation),
     // Refetch rather than patching the cache by hand: the server owns the
     // resulting state, including whether the write was a no-op.
     onSuccess: () => {
