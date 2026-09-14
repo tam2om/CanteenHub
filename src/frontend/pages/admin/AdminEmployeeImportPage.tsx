@@ -141,7 +141,7 @@ export function AdminEmployeeImportPage() {
           <h2 className="card__title">1. Choose a workbook</h2>
           <p className="panel__note">
             Upload the employee workbook (.xlsx). It must contain an{' '}
-            <strong>All Employees</strong> sheet with AMCO ID, Name, Department, Section and Roster
+            <strong>All Employees</strong> sheet with ID, Name, Department, Section and Roster
             columns. Uploading does not change anything on its own.
           </p>
 
@@ -259,7 +259,7 @@ export function AdminEmployeeImportPage() {
                       <div className="list__main">
                         <div>
                           <p className="list__title">
-                            {p?.amco_id || '(no AMCO ID)'} — {p?.full_name || '(no name)'}
+                            {p?.amco_id || '(no ID)'} — {p?.full_name || '(no name)'}
                           </p>
                           <p className="list__meta">
                             Row {row.row_number}

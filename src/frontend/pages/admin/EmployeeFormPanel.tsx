@@ -60,7 +60,7 @@ export function EmployeeFormPanel({ mode, employee, onClose }: Props) {
     setClientError(null);
 
     if (!isEdit && !amcoId.trim()) {
-      setClientError('AMCO ID is required.');
+      setClientError('ID is required.');
       return;
     }
     if (!fullName.trim()) {
@@ -113,7 +113,7 @@ export function EmployeeFormPanel({ mode, employee, onClose }: Props) {
       <form onSubmit={handleSubmit} noValidate>
         {!isEdit && (
           <label className="field">
-            <span className="field__label">AMCO ID</span>
+            <span className="field__label">ID</span>
             <input
               className="field__input"
               name="amco_id"

@@ -30,7 +30,7 @@ export function ProfilePage() {
 
   const rows: Array<[string, string]> = [
     ['Name', employee.full_name],
-    ['AMCO ID', employee.amco_id],
+    ['ID', employee.amco_id],
     ['Department', employee.department ?? '—'],
     ['Section', employee.section ?? '—'],
     ['Roster type', ROSTER_LABELS[employee.roster_type] ?? employee.roster_type],

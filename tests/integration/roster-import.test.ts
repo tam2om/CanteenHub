@@ -360,7 +360,7 @@ describe('Shift roster Excel import', () => {
       ]);
 
       expect(body.data.outcome).toBe('failed');
-      expect((await previewRows(id))[0].messages.join(' ')).toContain('No employee with AMCO ID');
+      expect((await previewRows(id))[0].messages.join(' ')).toContain('No employee with ID');
       expect(await countRows(db, 'SELECT COUNT(*) as n FROM employees')).toBe(before);
 
       const res = await commit(id);
@@ -378,7 +378,7 @@ describe('Shift roster Excel import', () => {
     it('rejects a missing AMCO ID', async () => {
       const { id, body } = await uploadAndValidate([rosterRow('', MONTH, YEAR, { 1: 'Day' })]);
       expect(body.data.outcome).toBe('failed');
-      expect((await previewRows(id))[0].messages.join(' ')).toContain('AMCO ID is missing');
+      expect((await previewRows(id))[0].messages.join(' ')).toContain('ID is missing');
     });
 
     it('imports a roster for a REGULAR employee without objecting', async () => {

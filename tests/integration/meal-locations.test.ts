@@ -257,7 +257,7 @@ describe('Meal collection points', () => {
       const rows = sheet.rows.map((r) => [...r.cells.values()]);
 
       expect(rows[0]).toEqual([
-        'AMCO ID', 'Name', 'Department', 'Section', 'Roster', 'Eligible', 'Reason', 'Choice',
+        'ID', 'Name', 'Department', 'Section', 'Roster', 'Eligible', 'Reason', 'Choice',
         'Canteen',
       ]);
       const row = rows.find((r) => r[0] === 'TEST601')!;

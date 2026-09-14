@@ -30,13 +30,17 @@ authRoutes.post('/login', async (c) => {
     if (!amco_id || !password) {
       return c.json({ 
         success: false, 
-        error: 'AMCO ID and password are required' 
+        error: 'ID and password are required' 
       }, 400);
     }
     
     // Get client IP for rate limiting (if available)
     const clientIP = c.req.raw.headers.get('CF-Connecting-IP') || 'unknown';
-    const rateLimitIdentifier = `${clientIP}:${amco_id}`;
+    // NORMALISED. The AMCO ID is matched case-insensitively, so the lockout
+    // bucket must be too: otherwise "admin001", "Admin001" and "ADMIN001" are
+    // three separate buckets and an attacker gets the full attempt allowance
+    // once per spelling.
+    const rateLimitIdentifier = `${clientIP}:${String(amco_id).trim().toUpperCase()}`;
     
     // Check rate limiting - use combined IP+AMCO ID identifier
     const lockoutStatus = await checkLoginLockout(c.env.DB, rateLimitIdentifier);

@@ -30,7 +30,7 @@ import { ApiError } from '../../api/client.js';
 
 /** Header spellings the importer accepts for the password column. */
 const PASSWORD_ALIASES = ['password', 'initial password', 'temporary password'];
-const AMCO_ALIASES = ['amco id#', 'amco id', 'amco_id', 'amcoid', 'employee id', 'code'];
+const AMCO_ALIASES = ['id', 'id#', 'amco id#', 'amco id', 'amco_id', 'amcoid', 'employee id', 'code'];
 
 interface Props {
   file: File;
@@ -122,7 +122,7 @@ export function ImportPasswordStep({ file, sheetName, onDone }: Props) {
           const [amcoId, password] = entries[index];
           const id = idByAmco.get(amcoId);
           if (id === undefined) {
-            failed.push({ amcoId, reason: 'No employee with this AMCO ID exists.' });
+            failed.push({ amcoId, reason: 'No employee with this ID exists.' });
           } else {
             try {
               await setEmployeePassword(id, password);

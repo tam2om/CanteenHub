@@ -14,7 +14,7 @@ import type { Env, Variables } from '../types/env.js';
 import { requireAuth, requireRole } from '../middleware/session.js';
 import {
   getEmployeeById,
-  getEmployeeByAmcoId,
+  getEmployeeByAmcoIdInsensitive,
   createEmployee,
   updateEmployee,
   setEmployeePassword,
@@ -159,7 +159,9 @@ app.post('/employees', async (c) => {
   if (refusal) return c.json({ success: false, error: refusal }, 403);
 
   const trimmedAmcoId = amco_id.trim();
-  if (await getEmployeeByAmcoId(db, trimmedAmcoId)) {
+  // Case-INSENSITIVE, because login is. Letting "amco002" be created beside
+  // "AMCO002" would produce two accounts that cannot be told apart at sign-in.
+  if (await getEmployeeByAmcoIdInsensitive(db, trimmedAmcoId)) {
     return c.json({ success: false, error: 'An employee with this amco_id already exists' }, 409);
   }
 
@@ -578,7 +580,7 @@ app.get('/reports/lunch.xlsx', async (c) => {
   ];
 
   const detailRows: CellValue[][] = [
-    ['AMCO ID', 'Name', 'Department', 'Section', 'Roster', 'Eligible', 'Reason', 'Choice', 'Canteen'],
+    ['ID', 'Name', 'Department', 'Section', 'Roster', 'Eligible', 'Reason', 'Choice', 'Canteen'],
     ...detail.map((row) => [
       row.amco_id,
       row.full_name,
