@@ -38,11 +38,7 @@ import {
 } from '../services/imports.service.js';
 import { logImportChange } from '../services/audit.service.js';
 import { buildXlsx, XLSX_CONTENT_TYPE, type CellValue } from '../lib/xlsxWrite.js';
-import {
-  DEFAULT_MEAL_LOCATION,
-  MEAL_LOCATIONS,
-  MEAL_LOCATION_LABELS,
-} from '../../shared/types/index.js';
+import { MEAL_LOCATIONS, MEAL_LOCATION_LABELS } from '../../shared/types/index.js';
 import { MIN_PASSWORD_LENGTH } from '../lib/password.js';
 import { ROSTER_TEMPLATE_VALUES } from '../imports/employees.js';
 
@@ -455,24 +451,20 @@ app.post('/:id/commit', async (c) => {
  * the generated file imports cleanly.
  */
 app.get('/templates/employees.xlsx', () => {
-  const headers = [
-    'ID',
-    'Name',
-    'Department',
-    'Section',
-    'Roster',
-    'Location',
-    'Password',
-  ];
+  // NO Location column. Where a meal is collected is chosen by the employee
+  // when they pick option 1 or 2, per day - it is not an attribute of the
+  // person, so asking for it here would only invite a value that the daily
+  // choice then overrides.
+  const headers = ['ID', 'Name', 'Department', 'Section', 'Roster', 'Password'];
 
   // Example rows, clearly marked. They are deleted by whoever fills the file
   // in - and if they are left behind, they are ordinary rows that import as
   // ordinary employees, not something that can corrupt anything.
   const rows: CellValue[][] = [
     headers,
-    ['EXAMPLE001', 'Example Person One', 'Mining', 'Operations', 'Regular', 'AMCO Canteen', ''],
-    ['EXAMPLE002', 'Example Person Two', 'Processing', 'Shifts', 'Shift', 'OMCO Canteen', ''],
-    ['EXAMPLE003', 'Example Person Three', 'Head Office', 'Finance', 'Amman HQ', 'WHC Canteen', ''],
+    ['EXAMPLE001', 'Example Person One', 'Mining', 'Operations', 'Regular', ''],
+    ['EXAMPLE002', 'Example Person Two', 'Processing', 'Shifts', 'Shift', ''],
+    ['EXAMPLE003', 'Example Person Three', 'Head Office', 'Finance', 'Amman HQ', ''],
   ];
 
   const notes: CellValue[][] = [
@@ -486,12 +478,6 @@ app.get('/templates/employees.xlsx', () => {
       'Yes',
       `${ROSTER_TEMPLATE_VALUES.join(' / ')}`,
       'Decides who is entitled to a meal on a given day. Anything else is rejected.',
-    ],
-    [
-      'Location',
-      'No',
-      MEAL_LOCATIONS.map((l) => MEAL_LOCATION_LABELS[l]).join(' / '),
-      `Where the employee normally collects their meal. Blank means ${MEAL_LOCATION_LABELS[DEFAULT_MEAL_LOCATION]}.`,
     ],
     [
       'Password',
@@ -508,12 +494,16 @@ app.get('/templates/employees.xlsx', () => {
     ['5. Check the preview before committing - nothing is written until you confirm.'],
     [],
     ['Re-importing the same file is safe: rows that have not changed are left alone.'],
+    [
+      `Where a meal is collected (${MEAL_LOCATIONS.map((l) => MEAL_LOCATION_LABELS[l]).join(', ')})`,
+      'is chosen by the employee when they pick their meal, not set here.',
+    ],
     ['This file is a template. It contains no real employee data.'],
   ];
 
   const bytes = buildXlsx([
     // The sheet name the importer looks for, so the file works unmodified.
-    { name: 'All Employees', rows, columnWidths: [14, 26, 20, 20, 12, 16, 16] },
+    { name: 'All Employees', rows, columnWidths: [14, 26, 20, 20, 12, 16] },
     { name: 'Instructions', rows: notes, columnWidths: [14, 10, 40, 60] },
   ]);
 

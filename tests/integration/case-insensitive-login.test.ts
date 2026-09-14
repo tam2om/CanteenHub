@@ -291,17 +291,26 @@ describe('Employee import template', () => {
     expect(body.data.action_counts).toEqual({ CREATE: 3, UPDATE: 0, UNCHANGED: 0, INVALID: 0 });
   });
 
-  it('its example rows exercise every roster type and every canteen', async () => {
+  it('its example rows exercise every roster type', async () => {
     const buffer = await (await download(admin.cookie)).arrayBuffer();
     const sheet = await readWorksheet(buffer, 'All Employees');
     const rows = sheet.rows.slice(1).map((r) => [...r.cells.values()]);
 
     const rosters = rows.map((r) => r[4]);
     expect(new Set(rosters).size).toBe(3);
-    const canteens = rows.map((r) => r[5]);
-    expect(new Set(canteens)).toEqual(
-      new Set(['AMCO Canteen', 'OMCO Canteen', 'WHC Canteen'])
-    );
+  });
+
+  it('does NOT ask for a canteen - that is chosen when the meal is picked', async () => {
+    const buffer = await (await download(admin.cookie)).arrayBuffer();
+    const sheet = await readWorksheet(buffer, 'All Employees');
+    const headers = [...sheet.rows[0].cells.values()];
+
+    expect(headers).toEqual(['ID', 'Name', 'Department', 'Section', 'Roster', 'Password']);
+    expect(headers).not.toContain('Location');
+
+    // And no example row carries one either.
+    const body = JSON.stringify(sheet.rows.slice(1).map((r) => [...r.cells.values()]));
+    expect(body).not.toContain('Canteen');
   });
 
   it('every roster value it suggests is one the parser accepts', async () => {
