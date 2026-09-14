@@ -7,6 +7,7 @@
 import type { ReactNode } from 'react';
 import { Link, NavLink } from 'react-router-dom';
 import { useLogout, useSession } from '../hooks/useSession.js';
+import amcoMark from '../assets/amco-mark.png';
 
 export function AdminLayout({ children }: { children: ReactNode }) {
   const { user } = useSession();
@@ -17,6 +18,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
       <header className="header">
         <div className="header__bar">
           <span className="header__brand">
+            <img className="header__mark" src={amcoMark} alt="AMCO" />
             CanteenHub <span className="header__tag">Admin</span>
           </span>
           <button
@@ -61,22 +63,10 @@ export function AdminLayout({ children }: { children: ReactNode }) {
             Menus
           </NavLink>
           <NavLink
-            to="/admin/imports/employees"
+            to="/admin/imports"
             className={({ isActive }) => `nav__link ${isActive ? 'nav__link--active' : ''}`}
           >
-            Employee import
-          </NavLink>
-          <NavLink
-            to="/admin/imports/roster"
-            className={({ isActive }) => `nav__link ${isActive ? 'nav__link--active' : ''}`}
-          >
-            Roster import
-          </NavLink>
-          <NavLink
-            to="/admin/imports/menu"
-            className={({ isActive }) => `nav__link ${isActive ? 'nav__link--active' : ''}`}
-          >
-            Menu import
+            Imports
           </NavLink>
           <NavLink
             to="/admin/settings"

@@ -11,6 +11,7 @@ import { Navigate } from 'react-router-dom';
 import { useLogin, useSession } from '../hooks/useSession.js';
 import { ApiError } from '../api/client.js';
 import { LoadingState } from '../components/States.js';
+import amcoLogo from '../assets/amco-logo.png';
 
 export function LoginPage() {
   const { isAuthenticated, isLoading } = useSession();
@@ -50,53 +51,59 @@ export function LoginPage() {
 
   return (
     <main className="login">
-      <div className="login__card">
-        <h1 className="login__title">CanteenHub</h1>
-        <p className="login__subtitle">Sign in to choose your lunch.</p>
+      <div style={{ width: '100%', maxWidth: '26rem' }}>
+        <span className="login__brand">
+          <img src={amcoLogo} alt="AMCO — Attarat Mining Company" />
+        </span>
+        <div className="login__card">
+          <p className="login__eyebrow">Canteen</p>
+          <h1 className="login__title">CanteenHub</h1>
+          <p className="login__subtitle">Sign in to choose your lunch.</p>
 
-        <form onSubmit={handleSubmit} noValidate>
-          <label className="field">
-            <span className="field__label">ID</span>
-            <input
-              className="field__input"
-              name="amco_id"
-              type="text"
-              autoComplete="username"
-              autoCapitalize="characters"
-              inputMode="text"
-              value={amcoId}
-              onChange={(e) => setAmcoId(e.target.value)}
-              aria-invalid={Boolean(validationError)}
-            />
-          </label>
+          <form onSubmit={handleSubmit} noValidate>
+            <label className="field">
+              <span className="field__label">ID</span>
+              <input
+                className="field__input"
+                name="amco_id"
+                type="text"
+                autoComplete="username"
+                autoCapitalize="characters"
+                inputMode="text"
+                value={amcoId}
+                onChange={(e) => setAmcoId(e.target.value)}
+                aria-invalid={Boolean(validationError)}
+              />
+            </label>
 
-          <label className="field">
-            <span className="field__label">Password</span>
-            <input
-              className="field__input"
-              name="password"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              aria-invalid={Boolean(validationError)}
-            />
-          </label>
+            <label className="field">
+              <span className="field__label">Password</span>
+              <input
+                className="field__input"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                aria-invalid={Boolean(validationError)}
+              />
+            </label>
 
-          {(validationError || serverError) && (
-            <p className="feedback feedback--error" role="alert">
-              {validationError ?? serverError}
-            </p>
-          )}
+            {(validationError || serverError) && (
+              <p className="feedback feedback--error" role="alert">
+                {validationError ?? serverError}
+              </p>
+            )}
 
-          <button type="submit" className="button button--primary" disabled={login.isPending}>
-            {login.isPending ? 'Signing in…' : 'Sign in'}
-          </button>
-        </form>
+            <button type="submit" className="button button--primary" disabled={login.isPending}>
+              {login.isPending ? 'Signing in…' : 'Sign in'}
+            </button>
+          </form>
 
-        <p className="login__help">
-          Forgotten your password? Ask the canteen administrator to set a new one.
-        </p>
+          <p className="login__help">
+            Forgotten your password? Ask the canteen administrator to set a new one.
+          </p>
+        </div>
       </div>
     </main>
   );

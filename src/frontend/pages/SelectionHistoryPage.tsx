@@ -18,7 +18,7 @@ export function SelectionHistoryPage() {
   }
 
   return (
-    <main className="page">
+    <main className="page page--narrow">
       <h1 className="page__title">Your selections</h1>
 
       {!data || data.entries.length === 0 ? (

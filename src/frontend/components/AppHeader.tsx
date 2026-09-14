@@ -6,6 +6,7 @@
 import { NavLink } from 'react-router-dom';
 import { useLogout, useSession } from '../hooks/useSession.js';
 import { isAdminRole } from './RequireAdmin.js';
+import amcoMark from '../assets/amco-mark.png';
 
 export function AppHeader() {
   const { user } = useSession();
@@ -14,7 +15,10 @@ export function AppHeader() {
   return (
     <header className="header">
       <div className="header__bar">
-        <span className="header__brand">CanteenHub</span>
+        <span className="header__brand">
+          <img className="header__mark" src={amcoMark} alt="AMCO" />
+          CanteenHub
+        </span>
         <button
           type="button"
           className="header__logout"

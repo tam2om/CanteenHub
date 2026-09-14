@@ -13,7 +13,7 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom/vitest';
 
 import { App } from '../../src/frontend/App.js';
-import { AdminMenuImportPage } from '../../src/frontend/pages/admin/AdminMenuImportPage.js';
+import { AdminImportPage } from '../../src/frontend/pages/admin/AdminImportPage.js';
 import { renderWithProviders, stubFetch, ADMIN_USER, SESSION_USER, ok, fail } from './helpers.js';
 
 const ME = '/api/auth/me';
@@ -161,7 +161,7 @@ describe('Menu import - upload step', () => {
 
   it('says clearly that this is the LUNCH menu and explains the accompaniment trap', async () => {
     stubFetch(routes());
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
 
     expect(await screen.findByRole('heading', { name: 'Import lunch menu' })).toBeInTheDocument();
     expect(screen.getByText(/a dinner sheet is never read as lunch/i)).toBeInTheDocument();
@@ -173,7 +173,7 @@ describe('Menu import - upload step', () => {
     const fetchMock = stubFetch(routes());
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await user.click(await screen.findByRole('button', { name: 'Upload and validate' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Choose a workbook first.');
@@ -184,7 +184,7 @@ describe('Menu import - upload step', () => {
     const fetchMock = stubFetch(routes());
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -212,7 +212,7 @@ describe('Menu import - upload step', () => {
     stubFetch(routes(), { delayPaths: ['/api/admin/imports'] });
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -223,7 +223,7 @@ describe('Menu import - upload step', () => {
     stubFetch(routes({ [UPLOAD]: fail(400, 'Only .xlsx workbooks can be imported.') }));
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -240,7 +240,7 @@ describe('Menu import - validation', () => {
     stubFetch(routes(), { delayPaths: [validatePath(BATCH_ID)] });
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -251,7 +251,7 @@ describe('Menu import - validation', () => {
     stubFetch(routes({ [validatePath(BATCH_ID)]: fail(422, 'No lunch worksheet was found.') }));
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -262,7 +262,7 @@ describe('Menu import - validation', () => {
     stubFetch(routes({ [detailPath(BATCH_ID)]: fail(500, 'The import could not be read.') }));
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -279,7 +279,7 @@ describe('Menu import - summary and preview', () => {
     stubFetch(routes());
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -305,7 +305,7 @@ describe('Menu import - summary and preview', () => {
     );
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -316,7 +316,7 @@ describe('Menu import - summary and preview', () => {
     stubFetch(routes());
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -334,7 +334,7 @@ describe('Menu import - summary and preview', () => {
     stubFetch(routes());
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -363,7 +363,7 @@ describe('Menu import - summary and preview', () => {
     stubFetch(routes({ [validatePath(BATCH_ID)]: ok(failed), [detailPath(BATCH_ID)]: ok(failed) }));
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -378,7 +378,7 @@ describe('Menu import - summary and preview', () => {
     stubFetch(routes({ [validatePath(BATCH_ID)]: ok(truncated), [detailPath(BATCH_ID)]: ok(truncated) }));
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -395,7 +395,7 @@ describe('Menu import - confirmation', () => {
     const fetchMock = stubFetch(routes());
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
     await user.click(await screen.findByRole('button', { name: 'Commit this import' }));
@@ -408,7 +408,7 @@ describe('Menu import - confirmation', () => {
     stubFetch(routes());
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
     await user.click(await screen.findByRole('button', { name: 'Commit this import' }));
@@ -426,7 +426,7 @@ describe('Menu import - confirmation', () => {
     const fetchMock = stubFetch(routes());
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
     await user.click(await screen.findByRole('button', { name: 'Commit this import' }));
@@ -447,7 +447,7 @@ describe('Menu import - confirmation', () => {
     );
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -466,7 +466,7 @@ describe('Menu import - confirmation', () => {
     stubFetch(routes({ [validatePath(BATCH_ID)]: ok(pending), [detailPath(BATCH_ID)]: ok(pending) }));
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -479,7 +479,7 @@ describe('Menu import - commit', () => {
     const fetchMock = stubFetch(routes());
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
     await user.click(await screen.findByRole('button', { name: 'Commit this import' }));
@@ -497,7 +497,7 @@ describe('Menu import - commit', () => {
     stubFetch(routes(), { delayPaths: [commitPath(BATCH_ID)] });
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
     await user.click(await screen.findByRole('button', { name: 'Commit this import' }));
@@ -510,7 +510,7 @@ describe('Menu import - commit', () => {
     stubFetch(routes({ [commitPath(BATCH_ID)]: fail(409, 'This import has already been committed.') }));
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
     await user.click(await screen.findByRole('button', { name: 'Commit this import' }));
@@ -524,7 +524,7 @@ describe('Menu import - commit', () => {
     stubFetch(routes());
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
     await user.click(await screen.findByRole('button', { name: 'Start over' }));
@@ -540,7 +540,7 @@ describe('Menu import - commit', () => {
 describe('Menu import - history', () => {
   it('asks the history API for menu imports only', async () => {
     const fetchMock = stubFetch(routes());
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByText('No menu imports yet.');
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('import_type=menu'))).toBe(true);
   });
@@ -557,14 +557,14 @@ describe('Menu import - history', () => {
       })
     );
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     const history = (await screen.findByText('march-menu.xlsx')).closest('section')!;
     expect(within(history).getByText('committed')).toBeInTheDocument();
   });
 
   it('reports a history failure without breaking the upload step', async () => {
     stubFetch(routes({ [HISTORY]: fail(500, 'The history could not be loaded.') }));
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
 
     expect(await screen.findByText('The history could not be loaded.')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '1. Choose a workbook' })).toBeInTheDocument();
@@ -578,7 +578,7 @@ describe('Menu import - handles no credentials', () => {
     localStorage.clear();
     sessionStorage.clear();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
     await user.click(await screen.findByRole('button', { name: 'Commit this import' }));
@@ -601,7 +601,7 @@ describe('Menu import - handles no credentials', () => {
     stubFetch(routes());
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
     await screen.findByRole('heading', { name: '3. Row preview' });
@@ -649,7 +649,7 @@ describe('Menu import - worksheet confirmation', () => {
     stubFetch(candidateRoutes());
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -665,7 +665,7 @@ describe('Menu import - worksheet confirmation', () => {
     stubFetch(candidateRoutes());
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -680,7 +680,7 @@ describe('Menu import - worksheet confirmation', () => {
     const fetchMock = stubFetch(candidateRoutes());
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
     await user.click(await screen.findByRole('checkbox'));
@@ -708,7 +708,7 @@ describe('Menu import - worksheet confirmation', () => {
     );
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -736,7 +736,7 @@ describe('Menu import - worksheet confirmation', () => {
     );
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminMenuImportPage />);
+    renderWithProviders(<AdminImportPage kind="menu" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
     await user.click(await screen.findByRole('checkbox'));

@@ -18,7 +18,7 @@ import { AdminReportsPage } from '../../src/frontend/pages/admin/AdminReportsPag
 import { AdminMenuPage } from '../../src/frontend/pages/admin/AdminMenuPage.js';
 import { AdminEmployeesPage } from '../../src/frontend/pages/admin/AdminEmployeesPage.js';
 import { AdminSettingsPage } from '../../src/frontend/pages/admin/AdminSettingsPage.js';
-import { AdminMenuImportPage } from '../../src/frontend/pages/admin/AdminMenuImportPage.js';
+import { AdminImportPage } from '../../src/frontend/pages/admin/AdminImportPage.js';
 import { renderWithProviders, stubFetch, ADMIN_USER, SESSION_USER, ok, fail } from './helpers.js';
 
 const ME = '/api/auth/me';
@@ -192,9 +192,7 @@ describe('Admin navigation', () => {
     ['Roster', '/admin/roster'],
     ['Reports', '/admin/reports'],
     ['Menus', '/admin/menu'],
-    ['Employee import', '/admin/imports/employees'],
-    ['Roster import', '/admin/imports/roster'],
-    ['Menu import', '/admin/imports/menu'],
+    ['Imports', '/admin/imports'],
     ['Settings', '/admin/settings'],
   ] as const;
 
@@ -252,7 +250,7 @@ describe('Admin navigation', () => {
     await waitFor(() => {
       const active = within(nav).getAllByRole('link').filter((a) => a.className.includes('nav__link--active'));
       expect(active).toHaveLength(1);
-      expect(active[0]).toHaveAccessibleName('Roster import');
+      expect(active[0]).toHaveAccessibleName('Imports');
     });
   });
 
@@ -371,7 +369,7 @@ describe('Every admin control has an accessible name', () => {
       '/api/admin/settings': ok([{ key: 'lunch_cutoff_time', value: '"10:00"', value_type: 'time' }]),
       '/api/admin/holidays': ok([]),
     }],
-    ['menu import', () => <AdminMenuImportPage />, {
+    ['menu import', () => <AdminImportPage kind="menu" />, {
       '/api/admin/imports?limit=10&offset=0&import_type=menu': ok({ imports: [], total: 0, limit: 10, offset: 0 }),
     }],
   ];

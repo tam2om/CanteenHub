@@ -13,9 +13,7 @@ import { RequireAdmin } from './components/RequireAdmin.js';
 import { AdminLayout } from './components/AdminLayout.js';
 import { AdminEmployeesPage } from './pages/admin/AdminEmployeesPage.js';
 import { AdminSettingsPage } from './pages/admin/AdminSettingsPage.js';
-import { AdminEmployeeImportPage } from './pages/admin/AdminEmployeeImportPage.js';
-import { AdminRosterImportPage } from './pages/admin/AdminRosterImportPage.js';
-import { AdminMenuImportPage } from './pages/admin/AdminMenuImportPage.js';
+import { AdminImportRoute } from './pages/admin/AdminImportPage.js';
 import { AdminMenuPage } from './pages/admin/AdminMenuPage.js';
 import { AdminReportsPage } from './pages/admin/AdminReportsPage.js';
 import { AdminRosterPage } from './pages/admin/AdminRosterPage.js';
@@ -82,21 +80,15 @@ export function App() {
         }
       />
       <Route
-        path="/admin/imports/employees"
-        element={
-          <RequireAdmin>
-            <AdminLayout>
-              <AdminEmployeeImportPage />
-            </AdminLayout>
-          </RequireAdmin>
-        }
+        path="/admin/imports"
+        element={<Navigate to="/admin/imports/employees" replace />}
       />
       <Route
-        path="/admin/imports/roster"
+        path="/admin/imports/:kind"
         element={
           <RequireAdmin>
             <AdminLayout>
-              <AdminRosterImportPage />
+              <AdminImportRoute />
             </AdminLayout>
           </RequireAdmin>
         }
@@ -127,16 +119,6 @@ export function App() {
           <RequireAdmin>
             <AdminLayout>
               <AdminMenuPage />
-            </AdminLayout>
-          </RequireAdmin>
-        }
-      />
-      <Route
-        path="/admin/imports/menu"
-        element={
-          <RequireAdmin>
-            <AdminLayout>
-              <AdminMenuImportPage />
             </AdminLayout>
           </RequireAdmin>
         }

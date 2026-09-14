@@ -83,14 +83,16 @@ export function EmployeeDashboard() {
   };
 
   return (
-    <main className="page">
+    <main className="page page--dashboard">
       <section className="identity">
-        <h1 className="identity__name">{employee.full_name}</h1>
-        <p className="identity__meta">
-          {employee.amco_id}
-          {employee.department && ` · ${employee.department}`}
-          {employee.section && ` · ${employee.section}`}
-        </p>
+        <div>
+          <h1 className="identity__name">{employee.full_name}</h1>
+          <p className="identity__meta">
+            {employee.amco_id}
+            {employee.department && ` · ${employee.department}`}
+            {employee.section && ` · ${employee.section}`}
+          </p>
+        </div>
         {/* Date comes from the server. The browser never decides what day it is. */}
         <p className="identity__date">{formatBusinessDate(businessDate)}</p>
       </section>

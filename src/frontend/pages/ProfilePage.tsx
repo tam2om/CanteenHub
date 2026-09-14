@@ -38,7 +38,7 @@ export function ProfilePage() {
   ];
 
   return (
-    <main className="page">
+    <main className="page page--narrow">
       <h1 className="page__title">Your profile</h1>
 
       <dl className="profile">
