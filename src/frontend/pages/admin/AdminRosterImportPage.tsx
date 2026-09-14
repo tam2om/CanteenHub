@@ -165,9 +165,20 @@ export function AdminRosterImportPage() {
           <p className="panel__note">
             Upload the shift roster workbook (.xlsx). It must contain a{' '}
             <strong>Shifts roster</strong> sheet laid out one row per employee-month —{' '}
-            <strong>code</strong>, <strong>month</strong>, <strong>year</strong>, then a column per
+            <strong>ID</strong>, <strong>Month</strong>, <strong>Year</strong>, then a column per
             day numbered 1 to 31, each holding Off, Day or Night. Uploading does not change anything
             on its own.
+          </p>
+
+          {/* A plain link: the browser fetches it with the session cookie and
+              saves what it is given. */}
+          <p className="panel__note">
+            Not sure of the format?{' '}
+            <a href="/api/admin/imports/templates/roster.xlsx">
+              Download the roster import template
+            </a>{' '}
+            — it has the exact columns and sheet name this screen expects, example rows to
+            delete, and an Instructions sheet listing the accepted values.
           </p>
 
           <div className="setting__form">

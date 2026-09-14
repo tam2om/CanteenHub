@@ -62,6 +62,18 @@ const REQUIRED_COLUMNS = ['amco_id', 'month', 'year'] as const;
  * otherwise become a real shift silently, and a loud validation error the
  * administrator can fix is strictly better than a quiet guess.
  */
+/**
+ * The shift spellings the downloadable template offers.
+ *
+ * Exported so the template is generated FROM the parser's own vocabulary. Every
+ * entry must appear in SHIFT_VALUES below, which a test asserts - a template
+ * suggesting a value the importer rejects is worse than no template.
+ */
+export const SHIFT_TEMPLATE_VALUES = ['Day', 'Night', 'Off'] as const;
+
+/** The widest month, so the template offers a column per possible day. */
+export const MAX_DAYS_IN_MONTH = 31;
+
 const SHIFT_VALUES: Record<string, ShiftValue> = {
   off: 'off',
   day: 'day',
