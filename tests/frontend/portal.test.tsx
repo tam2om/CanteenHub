@@ -329,7 +329,7 @@ describe('Dashboard — selection', () => {
     ['16. No Preference', 'no_preference', /No Preference/],
   ] as const;
 
-  it.each(choiceCases)('%s can be selected', async (_label, choice, pattern) => {
+  it.each(choiceCases)('%s can be picked and submitted', async (_label, choice, pattern) => {
     const user = userEvent.setup();
     let saved = false;
     const payload = todayPayload();
@@ -361,8 +361,40 @@ describe('Dashboard — selection', () => {
     const radio = await screen.findByRole('radio', { name: pattern });
     saved = true;
     await user.click(radio);
+    await user.click(screen.getByRole('button', { name: 'Submit my choice' }));
 
-    expect(await screen.findByRole('status')).toHaveTextContent(/Saved\./);
+    expect(await screen.findByRole('status')).toHaveTextContent(/Submitted\./);
+  });
+
+  it('picking an option does not send anything until Submit is pressed', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = stubFetch({
+      [ME]: ok(SESSION_USER),
+      [TODAY]: ok(todayPayload()),
+      [SELECT]: ok({ id: 1 }),
+    });
+
+    renderWithProviders(<EmployeeDashboard />);
+    await user.click(await screen.findByRole('radio', { name: /Option 1/ }));
+
+    // Marked on screen, and honest about not being sent.
+    expect(screen.getByRole('radio', { name: /Option 1/ })).toBeChecked();
+    expect(screen.getByText(/Not submitted yet/)).toBeInTheDocument();
+    expect(
+      fetchSpy.mock.calls.some(([url]) => String(url).includes(SELECT))
+    ).toBe(false);
+
+    await user.click(screen.getByRole('button', { name: 'Submit my choice' }));
+    await screen.findByRole('status');
+    expect(fetchSpy.mock.calls.some(([url]) => String(url).includes(SELECT))).toBe(true);
+  });
+
+  it('with nothing picked and nothing to change, Submit is disabled', async () => {
+    stubFetch({ [ME]: ok(SESSION_USER), [TODAY]: ok(todayPayload()) });
+
+    renderWithProviders(<EmployeeDashboard />);
+
+    expect(await screen.findByRole('button', { name: 'Submit my choice' })).toBeDisabled();
   });
 
   it('17. an existing selection is shown as selected', async () => {
@@ -387,6 +419,9 @@ describe('Dashboard — selection', () => {
     const option2 = await screen.findByRole('radio', { name: /Option 2/ });
     expect(option2).toBeChecked();
     expect(screen.getByRole('radio', { name: /Option 1/ })).not.toBeChecked();
+    // Already submitted, so there is nothing to send.
+    expect(screen.getByRole('button', { name: 'Submit my choice' })).toBeDisabled();
+    expect(screen.queryByText(/Not submitted yet/)).not.toBeInTheDocument();
   });
 
   it('18. a selection can be changed, and the change is reported', async () => {
@@ -402,11 +437,14 @@ describe('Dashboard — selection', () => {
 
     renderWithProviders(<EmployeeDashboard />);
     await user.click(await screen.findByRole('radio', { name: /Option 2/ }));
+    await user.click(screen.getByRole('button', { name: 'Submit my choice' }));
 
-    expect(await screen.findByRole('status')).toHaveTextContent('Saved. You are down for Option 2.');
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Submitted. You are down for Option 2 at AMCO Canteen.'
+    );
   });
 
-  it('21. re-picking the SAME choice reports no change', async () => {
+  it('21. re-picking the SAME choice leaves nothing to submit', async () => {
     const user = userEvent.setup();
     const withOption1 = todayPayload({
       selection: {
@@ -420,8 +458,31 @@ describe('Dashboard — selection', () => {
     renderWithProviders(<EmployeeDashboard />);
     await user.click(await screen.findByRole('radio', { name: /Option 1/ }));
 
+    expect(screen.getByRole('button', { name: 'Submit my choice' })).toBeDisabled();
+    expect(screen.queryByText(/Not submitted yet/)).not.toBeInTheDocument();
+  });
+
+  it('changing only the canteen is itself a submittable change', async () => {
+    const user = userEvent.setup();
+    const withOption1 = todayPayload({
+      selection: {
+        id: 1, meal_date: '2027-03-07', choice: 'option_1',
+        pickup_location: 'amco_canteen',
+        source: 'employee', selected_at: '', updated_at: '',
+      },
+    });
+
+    stubFetch({ [ME]: ok(SESSION_USER), [TODAY]: ok(withOption1), [SELECT]: ok({ id: 1 }) });
+
+    renderWithProviders(<EmployeeDashboard />);
+    await user.selectOptions(await screen.findByLabelText('Collect from'), 'omco_canteen');
+
+    const submit = screen.getByRole('button', { name: 'Submit my choice' });
+    expect(submit).toBeEnabled();
+    await user.click(submit);
+
     expect(await screen.findByRole('status')).toHaveTextContent(
-      'No change — you were already down for Option 1.'
+      'Submitted. You are down for Option 1 at OMCO Canteen.'
     );
   });
 
@@ -435,6 +496,7 @@ describe('Dashboard — selection', () => {
 
     renderWithProviders(<EmployeeDashboard />);
     await user.click(await screen.findByRole('radio', { name: /Option 1/ }));
+    await user.click(screen.getByRole('button', { name: 'Submit my choice' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Selection cutoff time has passed');
   });
@@ -465,6 +527,7 @@ describe('Dashboard — selection', () => {
 
     renderWithProviders(<EmployeeDashboard />);
     await user.click(await screen.findByRole('radio', { name: /Option 1/ }));
+    await user.click(screen.getByRole('button', { name: 'Submit my choice' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Not eligible: SHIFT_OFF');
   });

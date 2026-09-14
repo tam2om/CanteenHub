@@ -1,6 +1,11 @@
 /**
  * The employee's main screen: identity, business date, eligibility, menu,
- * selection. The whole task should be one tap.
+ * selection.
+ *
+ * Picking and submitting are separate. Tapping an option (or changing the
+ * canteen) only marks it locally; nothing reaches the kitchen until Submit is
+ * pressed. That costs one extra tap but removes the worse failure: a mis-tap
+ * silently becoming the order of record.
  */
 
 import { useState } from 'react';
@@ -29,6 +34,9 @@ export function EmployeeDashboard() {
 
   const mealDate = data?.mealDate ?? '';
   const select = useSelectMeal(mealDate);
+  // The unsent pick. null means "nothing picked since the last submit", so the
+  // screen falls back to showing what the server holds.
+  const [draftChoice, setDraftChoice] = useState<LunchChoice | null>(null);
   const [chosenLocation, setChosenLocation] = useState<MealLocation | null>(null);
 
   if (isLoading) return <LoadingState label="Loading today&rsquo;s lunch…" />;
@@ -57,29 +65,50 @@ export function EmployeeDashboard() {
   // Where the meal will be collected. Seeded from the saved selection if there
   // is one, otherwise from the employee's own default - so the common case is
   // already correct and nobody has to choose every day.
+  const savedChoice = selection?.choice ?? null;
   const savedLocation =
     selection?.pickup_location ?? employee.default_location ?? DEFAULT_MEAL_LOCATION;
   const location = chosenLocation ?? savedLocation;
+  const markedChoice = draftChoice ?? savedChoice;
+
+  // Something to send: a different meal, or the same meal at a different
+  // canteen (moving where a portion goes is a change the kitchen needs).
+  const hasUnsentChange =
+    markedChoice !== null && (markedChoice !== savedChoice || location !== savedLocation);
 
   const handleSelect = (choice: LunchChoice) => {
+    setDraftChoice(choice);
+    setFeedback(null);
+  };
+
+  const handleSubmit = () => {
+    if (!markedChoice) return;
     // The server decides whether this is allowed; the button being enabled is a
     // convenience, never the control.
-    const previous = selection?.choice ?? null;
+    const choice = markedChoice;
     setPending(choice);
     setFeedback(null);
 
-    select.mutate({ choice, pickupLocation: location }, {
-      onSuccess: () => setFeedback({ kind: 'saved', choice, changed: previous !== choice }),
-      onError: (err) =>
-        setFeedback({
-          kind: 'error',
-          message:
-            err instanceof ApiError
-              ? err.message
-              : 'Your selection could not be saved. Please try again.',
-        }),
-      onSettled: () => setPending(null),
-    });
+    select.mutate(
+      { choice, pickupLocation: location },
+      {
+        onSuccess: () => {
+          // Back to showing the server's own state.
+          setDraftChoice(null);
+          setChosenLocation(null);
+          setFeedback({ kind: 'saved', choice, location });
+        },
+        onError: (err) =>
+          setFeedback({
+            kind: 'error',
+            message:
+              err instanceof ApiError
+                ? err.message
+                : 'Your selection could not be saved. Please try again.',
+          }),
+        onSettled: () => setPending(null),
+      }
+    );
   };
 
   return (
@@ -108,16 +137,16 @@ export function EmployeeDashboard() {
       {eligibility.eligible && menu && (
         <section className="card">
           <MealSelection
-            current={selection?.choice ?? null}
+            current={markedChoice}
+            saved={savedChoice}
             disabled={!canSelect || select.isPending}
             pending={pending}
             optionNames={optionNames}
             onSelect={handleSelect}
           />
 
-          {/* Where to collect it. Changing this after a choice is saved
-              re-submits the same choice at the new canteen, because moving
-              where a portion is sent is itself a change the kitchen needs. */}
+          {/* Where to collect it. Like the meal itself, a change here is only
+              marked until Submit is pressed. */}
           <div className="field field--location">
             <label className="field__label" htmlFor="pickup-location">
               Collect from
@@ -128,28 +157,8 @@ export function EmployeeDashboard() {
               value={location}
               disabled={!canSelect || select.isPending}
               onChange={(e) => {
-                const next = e.target.value as MealLocation;
-                setChosenLocation(next);
-                if (selection?.choice) {
-                  setPending(selection.choice);
-                  setFeedback(null);
-                  select.mutate(
-                    { choice: selection.choice, pickupLocation: next },
-                    {
-                      onSuccess: () =>
-                        setFeedback({ kind: 'saved', choice: selection.choice, changed: true }),
-                      onError: (err) =>
-                        setFeedback({
-                          kind: 'error',
-                          message:
-                            err instanceof ApiError
-                              ? err.message
-                              : 'Your selection could not be saved. Please try again.',
-                        }),
-                      onSettled: () => setPending(null),
-                    }
-                  );
-                }
+                setChosenLocation(e.target.value as MealLocation);
+                setFeedback(null);
               }}
             >
               {MEAL_LOCATIONS.map((value) => (
@@ -160,9 +169,26 @@ export function EmployeeDashboard() {
             </select>
           </div>
 
+          <div className="actions">
+            <button
+              type="button"
+              className="button button--primary"
+              disabled={!canSelect || select.isPending || !hasUnsentChange}
+              onClick={handleSubmit}
+            >
+              {select.isPending ? 'Submitting…' : 'Submit my choice'}
+            </button>
+          </div>
+
           <SelectionConfirmation feedback={feedback} />
 
-          {selection && !feedback && (
+          {hasUnsentChange && !select.isPending && (
+            <p className="feedback feedback--warn" role="status">
+              Not submitted yet. Press &ldquo;Submit my choice&rdquo; to send it to the kitchen.
+            </p>
+          )}
+
+          {selection && !feedback && !hasUnsentChange && (
             <p className="feedback feedback--muted" role="status">
               Your current choice is saved.
               {!cutoffPassed && ' You can change it until the deadline.'}

@@ -236,6 +236,14 @@ a:hover { color: var(--navy); }
 }
 .choice--selected .choice__state { background: var(--accent); }
 
+/* Picked but not sent. Dashed border and a hollow tick so an unsubmitted
+   choice never looks like the one the kitchen holds. */
+.choice--unsent { border-style: dashed; }
+.choice--unsent .choice__state { background: transparent; color: var(--accent); border: 2px solid var(--accent); }
+
+.actions { display: flex; margin-top: 1rem; }
+.actions .button { width: 100%; }
+
 /* ---------- feedback & states ---------- */
 
 .feedback { margin: 0.875rem 0 0; padding: 0.75rem; border-radius: 8px; font-size: 0.9375rem; }
