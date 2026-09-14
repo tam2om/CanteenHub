@@ -1,0 +1,55 @@
+name: Deploy to Cloudflare
+
+# Runs the same checks docs/DEPLOYMENT.md asks a human to run by hand, then
+# applies any new D1 migrations and deploys the Worker. Requires two repo
+# secrets (Settings -> Secrets and variables -> Actions):
+#
+#   CLOUDFLARE_API_TOKEN    a token with Workers Scripts:Edit, D1:Edit and
+#                           Account Settings:Read on the target account
+#   CLOUDFLARE_ACCOUNT_ID   only needed if the token can see more than one
+#                           account; harmless to set otherwise
+#
+# Neither secret is read anywhere but the two steps below, and wrangler never
+# prints them.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+
+      # Idempotent: only migrations not yet recorded against canteenhub-prod
+      # are applied. Must run before the deploy below, since the new Worker
+      # code may expect columns/tables a not-yet-applied migration adds.
+      - name: Apply D1 migrations
+        run: npx wrangler d1 migrations apply canteenhub-prod --env production --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Build and deploy
+        run: npm run worker:deploy:prod
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
