@@ -12,9 +12,26 @@
  * records precisely so a menu correction cannot destroy what people chose; this
  * importer must not reintroduce that coupling by deleting menu rows.
  *
- * IT ALSO NEVER PUBLISHES. `status` is set once, to 'draft', when a menu day is
- * created. An existing day's status is never written, so an import can neither
- * publish a menu nobody has checked nor silently unpublish a live one.
+ * IT PUBLISHES WHAT IT COMMITS. A menu day this import creates is created
+ * `published`, and a day it UPDATES is promoted from `draft` to `published`.
+ *
+ * That reverses the original rule, deliberately and on request. The reasoning
+ * behind the old behaviour was that nothing should go live without a person
+ * looking at it - but a person HAS looked at it: the import cannot commit
+ * without an administrator reading the preview and confirming it. Making them
+ * then visit the menu screen and publish thirty days one at a time was asking
+ * for the same decision twice.
+ *
+ * Two limits remain, and they are the ones that actually protect anybody:
+ *
+ *   - NOTHING IS EVER UNPUBLISHED. Status only ever moves towards published.
+ *   - AN ARCHIVED DAY IS LEFT ALONE. Archiving is a deliberate act; an import
+ *     that resurrected it would be overruling a decision it cannot see the
+ *     reason for. Its dishes are still updated - only its status is untouched.
+ *
+ * An UNCHANGED row writes nothing at all, status included: the day already
+ * matches the workbook, so whatever status it carries is the one somebody
+ * chose for it.
  *
  * SHEET SHAPE - one row per calendar day:
  *
@@ -588,8 +605,9 @@ export async function validateMenuWorkbook(
     'Dates this workbook does not mention are left exactly as they are - no menu is removed.'
   );
   fileMessages.push(
-    'New menu days are created as drafts. Publishing stays a separate, deliberate step, and ' +
-      'an existing day keeps the status it already has.'
+    'Committing PUBLISHES these days: new days go live immediately, and a day still in draft ' +
+      'is published. Employees can select from them as soon as you confirm. A day that was ' +
+      'archived keeps that status, and nothing is ever unpublished.'
   );
 
   if (invalidCount > 0) {
@@ -656,7 +674,23 @@ export async function commitMenuWorkbook(db: D1Database, batch: ImportBatch): Pr
     if (existing.days.has(preview.meal_date)) continue;
     statements.push(
       db
-        .prepare(`INSERT INTO menu_days (meal_date, status) VALUES (?, 'draft')`)
+        .prepare(`INSERT INTO menu_days (meal_date, status) VALUES (?, 'published')`)
+        .bind(preview.meal_date)
+    );
+  }
+
+  // Existing days the workbook CHANGES go live too. Guarded on 'draft' so the
+  // statement can only ever move a day towards published: a published day stays
+  // published, and an archived one is left exactly as it is.
+  for (const preview of previews) {
+    const day = existing.days.get(preview.meal_date);
+    if (!day || day.status !== 'draft') continue;
+    statements.push(
+      db
+        .prepare(
+          `UPDATE menu_days SET status = 'published'
+           WHERE meal_date = ? AND status = 'draft'`
+        )
         .bind(preview.meal_date)
     );
   }
@@ -665,8 +699,9 @@ export async function commitMenuWorkbook(db: D1Database, batch: ImportBatch): Pr
     const day = existing.days.get(preview.meal_date) ?? null;
 
     // Options: keyed on (menu_day_id, option_number), exactly as the menu
-    // repository does. `status` is deliberately absent from every statement, so
-    // an import can neither publish nor unpublish a menu day.
+    // repository does. `status` is absent from these statements; publishing is
+    // handled once, above, so a dish update cannot change a day's visibility as
+    // a side effect.
     for (const [optionNumber, name] of [
       [1, preview.option_1],
       [2, preview.option_2],

@@ -231,14 +231,14 @@ describe('Lunch worksheet identification', () => {
       expect((await commit(id, { confirm_sheet: 'Page 1' })).status).toBe(200);
     });
 
-    it('still creates DRAFT days only, and publishes nothing', async () => {
+    it('publishes the days it commits, so they are immediately selectable', async () => {
       const { id } = await uploadAndValidate(buildRealWorldMenuWorkbook(DAY_ROWS));
       await commit(id, { confirm_sheet: 'Page 1' });
 
       const statuses = await db
         .prepare('SELECT DISTINCT status FROM menu_days')
         .all<{ status: string }>();
-      expect(statuses.results).toEqual([{ status: 'draft' }]);
+      expect(statuses.results).toEqual([{ status: 'published' }]);
     });
   });
 
@@ -503,14 +503,14 @@ describe('Lunch worksheet identification', () => {
       expect(body.data.sheet).toMatchObject({ name: 'Page 1', source: 'candidate' });
     });
 
-    it('commits the whole month once confirmed, as drafts', async () => {
+    it('commits the whole month once confirmed, published', async () => {
       const { id } = await uploadAndValidate(buildRealWorldMenuWorkbook(september()));
       expect((await commit(id, { confirm_sheet: 'Page 1' })).status).toBe(200);
 
       expect(await menuDayCount()).toBe(30);
       expect(await countRows(db, 'SELECT COUNT(*) as n FROM menu_options')).toBe(60);
       expect(
-        await countRows(db, "SELECT COUNT(*) as n FROM menu_days WHERE status = 'draft'")
+        await countRows(db, "SELECT COUNT(*) as n FROM menu_days WHERE status = 'published'")
       ).toBe(30);
 
       const first = await db

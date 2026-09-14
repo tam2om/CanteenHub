@@ -404,7 +404,7 @@ describe('Menu import - confirmation', () => {
     expect(fetchMock.mock.calls.filter(([url]) => String(url) === commitPath(BATCH_ID))).toHaveLength(0);
   });
 
-  it('spells out that nothing is published and no selection is changed', async () => {
+  it('spells out that committing PUBLISHES, and that no selection is changed', async () => {
     stubFetch(routes());
     const user = userEvent.setup();
 
@@ -414,8 +414,9 @@ describe('Menu import - confirmation', () => {
     await user.click(await screen.findByRole('button', { name: 'Commit this import' }));
 
     const dialog = await screen.findByRole('alertdialog');
-    expect(dialog).toHaveTextContent(/created as drafts/);
-    expect(dialog).toHaveTextContent(/nothing is published or unpublished/);
+    expect(dialog).toHaveTextContent(/Committing PUBLISHES these days/);
+    expect(dialog).toHaveTextContent(/nothing is ever\s*unpublished/);
+    expect(dialog).toHaveTextContent(/archived stays archived/);
     expect(dialog).toHaveTextContent(/lunch selections are\s*never changed/);
     expect(dialog).toHaveTextContent('synthetic-menu.xlsx');
   });
@@ -487,7 +488,7 @@ describe('Menu import - commit', () => {
     expect(await screen.findByRole('status')).toHaveTextContent(
       '1 menu day created and 1 updated from synthetic-menu.xlsx.'
     );
-    expect(screen.getByText(/this import never publishes one/i)).toBeInTheDocument();
+    expect(screen.getByText(/employees can select from them now/i)).toBeInTheDocument();
     expect(fetchMock.mock.calls.filter(([url]) => String(url) === commitPath(BATCH_ID))).toHaveLength(1);
   });
 
