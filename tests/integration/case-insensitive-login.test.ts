@@ -13,6 +13,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import app from '../../src/worker/index.js';
 import { createTestDb, type TestD1Database } from '../helpers/d1.js';
 import { buildEmployeeWorkbook } from '../helpers/xlsxFixture.js';
+import { listWorksheets, readWorksheet } from '../../src/worker/lib/xlsx.js';
 import {
   testEnv,
   seedEmployee,
@@ -208,5 +209,137 @@ describe('A workbook headed "ID"', () => {
     const body = await importWith(['AMCO ID#', 'Name', 'Department', 'Section', 'Roster']);
     expect(body.data.outcome).toBe('ready');
     expect(body.data.total_rows).toBe(1);
+  });
+});
+
+// ============================================================================
+// The downloadable template
+//
+// The point of the template is that it MATCHES the parser. So the test does not
+// check its headings against a list written by hand - it downloads the file and
+// feeds it straight back to the importer.
+// ============================================================================
+
+describe('Employee import template', () => {
+  let db: TestD1Database;
+  let env: ReturnType<typeof testEnv>;
+  let admin: SeededEmployee;
+  let employee: SeededEmployee;
+
+  beforeEach(async () => {
+    db = createTestDb();
+    env = testEnv(db);
+    admin = await seedEmployee(db, { amcoId: 'TEST695', roleId: ROLE_ADMIN });
+    employee = await seedEmployee(db, { amcoId: 'TEST696' });
+  });
+
+  const download = (cookie: string | null) =>
+    app.request(
+      `${BASE}/api/admin/imports/templates/employees.xlsx`,
+      cookie ? { headers: { Cookie: cookie } } : {},
+      env
+    );
+
+  it('is admin-only', async () => {
+    expect((await download(null)).status).toBe(401);
+    expect((await download(employee.cookie)).status).toBe(403);
+  });
+
+  it('downloads as a named .xlsx attachment', async () => {
+    const res = await download(admin.cookie);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe(
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    expect(res.headers.get('Content-Disposition')).toContain(
+      'canteenhub-employee-import-template.xlsx'
+    );
+  });
+
+  it('has the sheet the importer looks for, plus instructions', async () => {
+    const buffer = await (await download(admin.cookie)).arrayBuffer();
+    expect(await listWorksheets(buffer)).toEqual(['All Employees', 'Instructions']);
+  });
+
+  it('UPLOADS AND VALIDATES CLEANLY without being edited', async () => {
+    // The whole point: what the portal hands out is what the parser accepts.
+    const buffer = await (await download(admin.cookie)).arrayBuffer();
+
+    const form = new FormData();
+    form.set('import_type', 'employees');
+    form.set('file', new File([buffer], 'template.xlsx'));
+    const up = await app.request(
+      `${BASE}/api/admin/imports`,
+      { method: 'POST', headers: { Cookie: admin.cookie }, body: form },
+      env
+    );
+    expect(up.status).toBe(201);
+    const batch = (await readJson(up)).data as { id: number };
+
+    const body = await readJson(
+      await app.request(
+        `${BASE}/api/admin/imports/${batch.id}/validate`,
+        { method: 'POST', headers: { Cookie: admin.cookie } },
+        env
+      )
+    );
+
+    expect(body.data.outcome).toBe('ready');
+    expect(body.data.invalid_rows).toBe(0);
+    // The three EXAMPLE rows, which the user is told to delete.
+    expect(body.data.total_rows).toBe(3);
+    expect(body.data.action_counts).toEqual({ CREATE: 3, UPDATE: 0, UNCHANGED: 0, INVALID: 0 });
+  });
+
+  it('its example rows exercise every roster type and every canteen', async () => {
+    const buffer = await (await download(admin.cookie)).arrayBuffer();
+    const sheet = await readWorksheet(buffer, 'All Employees');
+    const rows = sheet.rows.slice(1).map((r) => [...r.cells.values()]);
+
+    const rosters = rows.map((r) => r[4]);
+    expect(new Set(rosters).size).toBe(3);
+    const canteens = rows.map((r) => r[5]);
+    expect(new Set(canteens)).toEqual(
+      new Set(['AMCO Canteen', 'OMCO Canteen', 'WHC Canteen'])
+    );
+  });
+
+  it('every roster value it suggests is one the parser accepts', async () => {
+    // A template offering a value the importer rejects is worse than none.
+    const buffer = await (await download(admin.cookie)).arrayBuffer();
+    const sheet = await readWorksheet(buffer, 'All Employees');
+
+    for (const [index, row] of sheet.rows.slice(1).entries()) {
+      const roster = [...row.cells.values()][4];
+      const bytes = buildEmployeeWorkbook(
+        [[`TEMPL${index}`, 'Test Person', 'Dept', 'Section', roster]],
+        { headers: ['ID', 'Name', 'Department', 'Section', 'Roster'] }
+      );
+      const form = new FormData();
+      form.set('import_type', 'employees');
+      form.set('file', new File([bytes as unknown as BlobPart], 'e.xlsx'));
+      const up = await app.request(
+        `${BASE}/api/admin/imports`,
+        { method: 'POST', headers: { Cookie: admin.cookie }, body: form },
+        env
+      );
+      const b = (await readJson(up)).data as { id: number };
+      const body = await readJson(
+        await app.request(
+          `${BASE}/api/admin/imports/${b.id}/validate`,
+          { method: 'POST', headers: { Cookie: admin.cookie } },
+          env
+        )
+      );
+      expect(body.data.outcome, `roster value "${roster}" must be accepted`).toBe('ready');
+    }
+  });
+
+  it('contains no real employee data', async () => {
+    const buffer = await (await download(admin.cookie)).arrayBuffer();
+    const sheet = await readWorksheet(buffer, 'All Employees');
+    const raw = JSON.stringify(sheet.rows.map((r) => [...r.cells.values()]));
+    expect(raw).toContain('EXAMPLE001');
+    expect(raw).not.toMatch(/AMCO0\d\d/);
   });
 });

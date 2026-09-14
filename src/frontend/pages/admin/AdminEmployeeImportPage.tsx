@@ -145,6 +145,17 @@ export function AdminEmployeeImportPage() {
             columns. Uploading does not change anything on its own.
           </p>
 
+          {/* A plain link: the browser fetches it with the session cookie and
+              saves what it is given. */}
+          <p className="panel__note">
+            Not sure of the format?{' '}
+            <a href="/api/admin/imports/templates/employees.xlsx">
+              Download the employee import template
+            </a>{' '}
+            — it has the exact columns this screen expects, example rows to
+            delete, and an Instructions sheet listing the accepted values.
+          </p>
+
           <div className="setting__form">
             <label className="field field--inline">
               <span className="field__label">Workbook</span>

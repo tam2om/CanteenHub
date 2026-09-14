@@ -62,6 +62,16 @@ const REQUIRED_COLUMNS = ['amco_id', 'full_name', 'roster_type'] as const;
  * is REJECTED - never coerced to a default, because guessing here would decide
  * whether a real person is fed.
  */
+/**
+ * The roster spellings the downloadable template offers.
+ *
+ * Exported so the template is generated FROM the parser's own vocabulary: a
+ * template that suggests a value the importer rejects is worse than no
+ * template. Every entry here must appear in ROSTER_VALUES below, which a test
+ * asserts.
+ */
+export const ROSTER_TEMPLATE_VALUES = ['Regular', 'Shift', 'Amman HQ'] as const;
+
 const ROSTER_VALUES: Record<string, RosterType> = {
   regular: 'regular',
   shift: 'shift',
