@@ -285,7 +285,7 @@ export function AdminRosterImportPage() {
                       <div className="list__main">
                         <div>
                           <p className="list__title">
-                            {p?.amco_id || '(no AMCO ID)'}
+                            {p?.amco_id || '(no ID)'}
                             {p?.month && p?.year
                               ? ` — ${String(p.month).padStart(2, '0')}/${p.year}`
                               : ''}

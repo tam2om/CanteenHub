@@ -25,6 +25,25 @@ export async function getEmployeeById(db: D1Database, id: number): Promise<Emplo
 /**
  * Get employee by AMCO ID
  */
+/**
+ * Find an employee by AMCO ID, IGNORING CASE.
+ *
+ * Used to refuse a duplicate before it is created. Because login now matches
+ * case-insensitively, allowing "amco002" to exist beside "AMCO002" would create
+ * a credential nobody can use unambiguously - so the pair is prevented at the
+ * point of creation rather than resolved at the point of login.
+ */
+export async function getEmployeeByAmcoIdInsensitive(
+  db: D1Database,
+  amcoId: string
+): Promise<EmployeeDB | null> {
+  const result = await db
+    .prepare('SELECT * FROM employees WHERE amco_id = ? COLLATE NOCASE')
+    .bind(amcoId.trim())
+    .first<EmployeeDB>();
+  return result || null;
+}
+
 export async function getEmployeeByAmcoId(db: D1Database, amcoId: string): Promise<EmployeeDB | null> {
   const result = await db
     .prepare('SELECT * FROM employees WHERE amco_id = ?')
@@ -39,12 +58,24 @@ export async function getEmployeeByAmcoId(db: D1Database, amcoId: string): Promi
  * Only used internally during login
  */
 export async function getEmployeeForAuth(db: D1Database, amcoId: string): Promise<(EmployeeDB & { password_hash: string | null }) | null> {
-  const result = await db
-    .prepare('SELECT * FROM employees WHERE amco_id = ? AND is_active = 1')
-    .bind(amcoId)
-    .first<EmployeeDB & { password_hash: string | null }>();
-  
-  return result || null;
+  // CASE-INSENSITIVE: people type "amco002" on a phone keyboard that
+  // capitalises, or read the id off a badge in a different case. The stored
+  // value keeps whatever case it was created with; only the comparison is
+  // relaxed.
+  const rows = await db
+    .prepare('SELECT * FROM employees WHERE amco_id = ? COLLATE NOCASE AND is_active = 1')
+    .bind(amcoId.trim())
+    .all<EmployeeDB & { password_hash: string | null }>();
+
+  const results = rows.results || [];
+  if (results.length <= 1) return results[0] ?? null;
+
+  // More than one row differing only in case. The UNIQUE constraint on amco_id
+  // is case-SENSITIVE, so "AMCO002" and "amco002" can both exist in a database
+  // created before this lookup was relaxed. Signing someone into whichever row
+  // the query happened to return first would be the worst possible outcome, so
+  // an exact match wins and anything else is REFUSED rather than guessed at.
+  return results.find((row) => row.amco_id === amcoId.trim()) ?? null;
 }
 
 /**

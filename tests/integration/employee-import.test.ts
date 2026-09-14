@@ -281,7 +281,7 @@ describe('Employee Excel import', () => {
       expect(body.data.invalid_rows).toBe(3);
       const detail = await readJson(await preview(id));
       const messages = detail.data.preview_rows.map((r: { messages: string[] }) => r.messages.join(' '));
-      expect(messages[0]).toContain('AMCO ID is missing');
+      expect(messages[0]).toContain('ID is missing');
       expect(messages[1]).toContain('Name is missing');
       expect(messages[2]).toContain('Roster is missing');
     });

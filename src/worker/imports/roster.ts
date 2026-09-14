@@ -44,7 +44,7 @@ export type RosterRowAction = 'CREATE' | 'UPDATE' | 'UNCHANGED' | 'INVALID';
  * at.
  */
 const COLUMN_ALIASES: Record<string, string[]> = {
-  amco_id: ['code', 'amco id#', 'amco id', 'amco_id', 'amcoid', 'employee id'],
+  amco_id: ['id', 'id#', 'code', 'amco id#', 'amco id', 'amco_id', 'amcoid', 'employee id'],
   month: ['month'],
   year: ['year'],
 };
@@ -213,12 +213,15 @@ async function loadEmployeesByAmcoId(
 
     const placeholders = chunk.map(() => '?').join(', ');
     const result = await db
-      .prepare(`SELECT id, amco_id FROM employees WHERE amco_id IN (${placeholders})`)
+      .prepare(
+        // COLLATE NOCASE, matching how ids are compared everywhere else.
+        `SELECT id, amco_id FROM employees WHERE amco_id COLLATE NOCASE IN (${placeholders})`
+      )
       .bind(...chunk)
       .all<{ id: number; amco_id: string }>();
 
     for (const row of result.results || []) {
-      found.set(row.amco_id, row);
+      found.set(row.amco_id.toUpperCase(), row);
     }
   }
 
@@ -365,9 +368,9 @@ export async function validateRosterWorkbook(
     const errors: string[] = [];
 
     if (!row.amcoId) {
-      errors.push('AMCO ID is missing.');
+      errors.push('ID is missing.');
     } else if (!AMCO_ID_PATTERN.test(row.amcoId)) {
-      errors.push('AMCO ID contains unsupported characters.');
+      errors.push('ID contains unsupported characters.');
     }
 
     const month = parseMonth(row.monthRaw);
@@ -383,10 +386,10 @@ export async function validateRosterWorkbook(
     // An unknown employee is never created from a roster file.
     let employeeId: number | null = null;
     if (row.amcoId && AMCO_ID_PATTERN.test(row.amcoId)) {
-      const employee = employees.get(row.amcoId);
+      const employee = employees.get(row.amcoId.toUpperCase());
       if (!employee) {
         errors.push(
-          `No employee with AMCO ID "${row.amcoId}" exists. Import the employee first; a roster file never creates one.`
+          `No employee with ID "${row.amcoId}" exists. Import the employee first; a roster file never creates one.`
         );
       } else {
         employeeId = employee.id;

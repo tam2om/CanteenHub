@@ -96,7 +96,7 @@ const UPDATE_ROW = {
 const INVALID_ROW = {
   row_number: 4,
   status: 'invalid',
-  messages: ['No employee with AMCO ID "TEST404" exists.'],
+  messages: ['No employee with ID "TEST404" exists.'],
   preview: {
     action: 'INVALID',
     amco_id: 'TEST404',
@@ -402,7 +402,7 @@ describe('Roster import - row preview', () => {
     await uploadWorkbook(user);
 
     expect(
-      await screen.findByText('No employee with AMCO ID "TEST404" exists.')
+      await screen.findByText('No employee with ID "TEST404" exists.')
     ).toBeInTheDocument();
   });
 

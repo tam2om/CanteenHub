@@ -78,7 +78,7 @@ export function AdminEmployeesPage() {
           <input
             className="field__input"
             type="search"
-            placeholder="Name, AMCO ID or department"
+            placeholder="Name, ID or department"
             value={search}
             onChange={(e) => {
               setSearch(e.target.value);

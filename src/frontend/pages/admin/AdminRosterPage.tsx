@@ -86,7 +86,7 @@ export function AdminRosterPage() {
             <input
               className="field__input"
               type="search"
-              placeholder="Name or AMCO ID"
+              placeholder="Name or ID"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />

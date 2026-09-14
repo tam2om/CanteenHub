@@ -41,7 +41,10 @@ type RosterType = 'regular' | 'shift' | 'amman_hq';
  * comparison. Anything outside this list is NOT guessed at.
  */
 const COLUMN_ALIASES: Record<string, string[]> = {
-  amco_id: ['amco id#', 'amco id', 'amco_id', 'amcoid', 'employee id', 'code'],
+  // "ID" is the company-wide name: Attarat has three entities (AMCO, OMCO,
+  // APCO), so an id is not an AMCO id. The older spellings are kept so
+  // workbooks already in circulation keep importing unchanged.
+  amco_id: ['id', 'id#', 'amco id#', 'amco id', 'amco_id', 'amcoid', 'employee id', 'code'],
   full_name: ['name', 'full name', 'employee name', 'full_name'],
   department: ['department', 'dept'],
   section: ['section'],
@@ -124,14 +127,18 @@ async function loadExistingByAmcoId(
     const placeholders = chunk.map(() => '?').join(', ');
     const result = await db
       .prepare(
+        // COLLATE NOCASE on the column, so an existing "AMCO002" is found by a
+        // workbook that writes "amco002" - matching how login and the create
+        // endpoint compare ids.
         `SELECT id, amco_id, full_name, department, section, roster_type, default_location
-         FROM employees WHERE amco_id IN (${placeholders})`
+         FROM employees WHERE amco_id COLLATE NOCASE IN (${placeholders})`
       )
       .bind(...chunk)
       .all<ExistingEmployee>();
 
     for (const row of result.results || []) {
-      found.set(row.amco_id, row);
+      // Keyed uppercase; the caller looks up the same way.
+      found.set(row.amco_id.toUpperCase(), row);
     }
   }
 
@@ -214,7 +221,7 @@ export async function validateEmployeeWorkbook(
   const missing = REQUIRED_COLUMNS.filter((field) => !columnOf.has(field));
   if (missing.length > 0) {
     const names: Record<string, string> = {
-      amco_id: 'AMCO ID',
+      amco_id: 'ID',
       full_name: 'Name',
       roster_type: 'Roster',
     };
@@ -296,14 +303,14 @@ export async function validateEmployeeWorkbook(
     const errors: string[] = [];
 
     if (!row.amcoId) {
-      errors.push('AMCO ID is missing.');
+      errors.push('ID is missing.');
     } else if (!AMCO_ID_PATTERN.test(row.amcoId)) {
-      errors.push('AMCO ID contains unsupported characters.');
+      errors.push('ID contains unsupported characters.');
     } else if ((seenCounts.get(row.amcoId.toUpperCase()) ?? 0) > 1) {
       // Never resolved silently: which row is correct is a business decision,
       // so the administrator fixes the workbook rather than the importer
       // guessing.
-      errors.push('AMCO ID appears more than once in the workbook.');
+      errors.push('ID appears more than once in the workbook.');
     }
 
     if (!row.fullName) {
@@ -372,7 +379,11 @@ export async function validateEmployeeWorkbook(
       continue;
     }
 
-    const current = existing.get(row.amcoId);
+    // Keyed case-insensitively, matching both the login lookup and the
+    // create endpoint. Otherwise a workbook spelling an existing employee
+    // "amco002" would CREATE a second account nobody could sign into
+    // unambiguously, instead of updating the one that exists.
+    const current = existing.get(row.amcoId.toUpperCase());
     const incoming = {
       full_name: row.fullName,
       department: row.department || null,

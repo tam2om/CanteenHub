@@ -54,7 +54,7 @@ describe('Login', () => {
     renderWithProviders(<App />, { route: '/login' });
 
     await screen.findByRole('heading', { name: 'CanteenHub' });
-    await user.type(screen.getByLabelText('AMCO ID'), 'TEST001');
+    await user.type(screen.getByLabelText('ID'), 'TEST001');
     await user.type(screen.getByLabelText('Password'), 'correct-horse-battery');
     signedIn = true;
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
@@ -71,11 +71,11 @@ describe('Login', () => {
 
     renderWithProviders(<LoginPage />);
 
-    await user.type(await screen.findByLabelText('AMCO ID'), 'TEST001');
+    await user.type(await screen.findByLabelText('ID'), 'TEST001');
     await user.type(screen.getByLabelText('Password'), 'wrong-password-here');
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Invalid AMCO ID or password.');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Invalid ID or password.');
   });
 
   it('validates empty fields before calling the API', async () => {
@@ -85,7 +85,7 @@ describe('Login', () => {
     renderWithProviders(<LoginPage />);
     await user.click(await screen.findByRole('button', { name: 'Sign in' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Enter your AMCO ID and password.');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Enter your ID and password.');
     expect(fetchSpy.mock.calls.some(([u]) => String(u).includes('/login'))).toBe(false);
   });
 
@@ -97,7 +97,7 @@ describe('Login', () => {
     );
 
     renderWithProviders(<LoginPage />);
-    await user.type(await screen.findByLabelText('AMCO ID'), 'TEST001');
+    await user.type(await screen.findByLabelText('ID'), 'TEST001');
     await user.type(screen.getByLabelText('Password'), 'correct-horse-battery');
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
 
@@ -109,7 +109,7 @@ describe('Login', () => {
     stubFetch({ [ME]: fail(401, 'Not authenticated'), [LOGIN]: ok({ employee: SESSION_USER }) });
 
     renderWithProviders(<LoginPage />);
-    await user.type(await screen.findByLabelText('AMCO ID'), 'TEST001');
+    await user.type(await screen.findByLabelText('ID'), 'TEST001');
     await user.type(screen.getByLabelText('Password'), 'correct-horse-battery');
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
 

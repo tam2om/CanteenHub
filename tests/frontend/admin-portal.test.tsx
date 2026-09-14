@@ -273,7 +273,7 @@ describe('Create employee', () => {
     renderWithProviders(<AdminEmployeesPage />);
     const form = await openForm(user);
 
-    await user.type(form.getByLabelText('AMCO ID'), 'TEST100');
+    await user.type(form.getByLabelText('ID'), 'TEST100');
     await user.type(form.getByLabelText('Name'), 'New Person');
     await user.type(form.getByLabelText('Department'), 'Mining');
     await user.selectOptions(form.getByLabelText('Roster type'), 'shift');
@@ -319,7 +319,7 @@ describe('Create employee', () => {
     renderWithProviders(<AdminEmployeesPage />);
     const form = await openForm(user);
 
-    await user.type(form.getByLabelText('AMCO ID'), 'TEST001');
+    await user.type(form.getByLabelText('ID'), 'TEST001');
     await user.type(form.getByLabelText('Name'), 'Clashing Person');
     await user.click(form.getByRole('button', { name: 'Create employee' }));
 
@@ -339,7 +339,7 @@ describe('Create employee', () => {
     const form = await openForm(user);
     await user.click(form.getByRole('button', { name: 'Create employee' }));
 
-    expect(await form.findByRole('alert')).toHaveTextContent('AMCO ID is required.');
+    expect(await form.findByRole('alert')).toHaveTextContent('ID is required.');
     expect(fetchSpy.mock.calls.some(([, i]) => (i as RequestInit)?.method === 'POST')).toBe(false);
   });
 

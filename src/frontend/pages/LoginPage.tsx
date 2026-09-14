@@ -28,7 +28,7 @@ export function LoginPage() {
     setValidationError(null);
 
     if (!amcoId.trim() || !password) {
-      setValidationError('Enter your AMCO ID and password.');
+      setValidationError('Enter your ID and password.');
       return;
     }
 
@@ -42,7 +42,7 @@ export function LoginPage() {
   const serverError =
     login.error instanceof ApiError
       ? login.error.status === 401
-        ? 'Invalid AMCO ID or password.'
+        ? 'Invalid ID or password.'
         : login.error.message
       : login.error
         ? 'Sign-in failed. Please try again.'
@@ -56,7 +56,7 @@ export function LoginPage() {
 
         <form onSubmit={handleSubmit} noValidate>
           <label className="field">
-            <span className="field__label">AMCO ID</span>
+            <span className="field__label">ID</span>
             <input
               className="field__input"
               name="amco_id"
