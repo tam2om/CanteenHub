@@ -13,7 +13,7 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom/vitest';
 
 import { App } from '../../src/frontend/App.js';
-import { AdminRosterImportPage } from '../../src/frontend/pages/admin/AdminRosterImportPage.js';
+import { AdminImportPage } from '../../src/frontend/pages/admin/AdminImportPage.js';
 import { renderWithProviders, stubFetch, ADMIN_USER, SESSION_USER, ok, fail } from './helpers.js';
 
 const ME = '/api/auth/me';
@@ -169,7 +169,7 @@ describe('Roster import - upload step', () => {
   it('describes the real wide-month sheet shape', async () => {
     stubFetch(routes());
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
 
     expect(await screen.findByText(/Shifts roster/)).toBeInTheDocument();
     expect(screen.getByText(/Off, Day or Night/)).toBeInTheDocument();
@@ -180,7 +180,7 @@ describe('Roster import - upload step', () => {
     const fetchMock = stubFetch(routes());
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
     await user.click(await screen.findByRole('button', { name: 'Upload and validate' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Choose a workbook first.');
@@ -193,7 +193,7 @@ describe('Roster import - upload step', () => {
     const fetchMock = stubFetch(routes());
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -223,7 +223,7 @@ describe('Roster import - upload step', () => {
     stubFetch(routes(), { delayPaths: ['/api/admin/imports'] });
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -234,7 +234,7 @@ describe('Roster import - upload step', () => {
     stubFetch(routes({ [UPLOAD]: fail(400, 'Only .xlsx workbooks can be imported.') }));
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -253,7 +253,7 @@ describe('Roster import - validation', () => {
     stubFetch(routes(), { delayPaths: [validatePath(BATCH_ID)] });
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -264,7 +264,7 @@ describe('Roster import - validation', () => {
     stubFetch(routes({ [validatePath(BATCH_ID)]: fail(422, 'Sheet "Shifts roster" is missing.') }));
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -275,7 +275,7 @@ describe('Roster import - validation', () => {
     stubFetch(routes({ [detailPath(BATCH_ID)]: fail(500, 'The import could not be read.') }));
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -292,7 +292,7 @@ describe('Roster import - summary', () => {
     stubFetch(routes());
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -325,7 +325,7 @@ describe('Roster import - summary', () => {
     );
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -344,7 +344,7 @@ describe('Roster import - summary', () => {
     stubFetch(routes({ [validatePath(BATCH_ID)]: ok(failed), [detailPath(BATCH_ID)]: ok(failed) }));
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -358,7 +358,7 @@ describe('Roster import - row preview', () => {
     stubFetch(routes());
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -375,7 +375,7 @@ describe('Roster import - row preview', () => {
     stubFetch(routes());
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -397,7 +397,7 @@ describe('Roster import - row preview', () => {
     stubFetch(routes({ [validatePath(BATCH_ID)]: ok(failed), [detailPath(BATCH_ID)]: ok(failed) }));
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -413,7 +413,7 @@ describe('Roster import - row preview', () => {
     );
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -424,7 +424,7 @@ describe('Roster import - row preview', () => {
     stubFetch(routes());
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
     await screen.findByRole('heading', { name: '3. Row preview' });
@@ -443,7 +443,7 @@ describe('Roster import - confirmation', () => {
     const fetchMock = stubFetch(routes());
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
     await user.click(await screen.findByRole('button', { name: 'Commit this import' }));
@@ -458,7 +458,7 @@ describe('Roster import - confirmation', () => {
     stubFetch(routes());
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
     await user.click(await screen.findByRole('button', { name: 'Commit this import' }));
@@ -475,7 +475,7 @@ describe('Roster import - confirmation', () => {
     const fetchMock = stubFetch(routes());
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
     await user.click(await screen.findByRole('button', { name: 'Commit this import' }));
@@ -498,7 +498,7 @@ describe('Roster import - confirmation', () => {
     );
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -518,7 +518,7 @@ describe('Roster import - confirmation', () => {
     stubFetch(routes({ [validatePath(BATCH_ID)]: ok(done), [detailPath(BATCH_ID)]: ok(done) }));
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
 
@@ -531,7 +531,7 @@ describe('Roster import - commit', () => {
     const fetchMock = stubFetch(routes());
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
     await user.click(await screen.findByRole('button', { name: 'Commit this import' }));
@@ -550,7 +550,7 @@ describe('Roster import - commit', () => {
     stubFetch(routes(), { delayPaths: [commitPath(BATCH_ID)] });
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
     await user.click(await screen.findByRole('button', { name: 'Commit this import' }));
@@ -565,7 +565,7 @@ describe('Roster import - commit', () => {
     );
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
     await user.click(await screen.findByRole('button', { name: 'Commit this import' }));
@@ -579,7 +579,7 @@ describe('Roster import - commit', () => {
     stubFetch(routes());
     const user = userEvent.setup();
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
     await user.click(await screen.findByRole('button', { name: 'Start over' }));
@@ -596,7 +596,7 @@ describe('Roster import - history', () => {
   it('asks the history API for roster imports only', async () => {
     const fetchMock = stubFetch(routes());
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
     await screen.findByText('No roster imports yet.');
 
     expect(
@@ -616,7 +616,7 @@ describe('Roster import - history', () => {
       })
     );
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
 
     const history = (await screen.findByText('march.xlsx')).closest('section')!;
     expect(within(history).getByText(/2027-03-07 08:00:00/)).toBeInTheDocument();
@@ -626,7 +626,7 @@ describe('Roster import - history', () => {
   it('reports a history failure without breaking the upload step', async () => {
     stubFetch(routes({ [HISTORY]: fail(500, 'The history could not be loaded.') }));
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
 
     expect(await screen.findByText('The history could not be loaded.')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '1. Choose a workbook' })).toBeInTheDocument();
@@ -644,7 +644,7 @@ describe('Roster import - handles no credentials', () => {
     localStorage.clear();
     sessionStorage.clear();
 
-    renderWithProviders(<AdminRosterImportPage />);
+    renderWithProviders(<AdminImportPage kind="roster" />);
     await screen.findByRole('button', { name: 'Upload and validate' });
     await uploadWorkbook(user);
     await user.click(await screen.findByRole('button', { name: 'Commit this import' }));
