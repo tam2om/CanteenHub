@@ -414,7 +414,8 @@ describe('Menu import - confirmation', () => {
     await user.click(await screen.findByRole('button', { name: 'Commit this import' }));
 
     const dialog = await screen.findByRole('alertdialog');
-    expect(dialog).toHaveTextContent(/Committing PUBLISHES these days/);
+    expect(dialog).toHaveTextContent(/Committing PUBLISHES every date in this workbook/);
+    expect(dialog).toHaveTextContent(/already\s*correct but still in draft/);
     expect(dialog).toHaveTextContent(/nothing is ever\s*unpublished/);
     expect(dialog).toHaveTextContent(/archived stays archived/);
     expect(dialog).toHaveTextContent(/lunch selections are\s*never changed/);

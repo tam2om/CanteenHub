@@ -957,11 +957,63 @@ describe('Lunch menu Excel import', () => {
       db.executedWrites.length = 0;
       await commit(id);
 
-      expect(db.executedWrites.filter((sql) => /menu_days|menu_options|menu_components/i.test(sql))).toEqual([]);
+      // No DISH churn: not one option or component statement.
+      expect(
+        db.executedWrites.filter((sql) => /menu_options|menu_components/i.test(sql))
+      ).toEqual([]);
+      // The day was seeded as a draft, so the ONE thing that is written is the
+      // publish. Nothing else about the day is touched.
+      const dayWrites = db.executedWrites.filter((sql) => /menu_days/i.test(sql));
+      expect(dayWrites).toHaveLength(1);
+      expect(dayWrites[0]).toMatch(/status\s*=\s*'published'/);
+
       expect((await components('2027-03-01')).map((c) => c.name).sort()).toEqual([
         'Keep Dessert',
         'Same Salad',
       ]);
+    });
+
+    it('writes NOTHING when the day is already published and unchanged', async () => {
+      await seedMenu('2027-03-01', 'Test Main Alpha', 'Test Main Beta', 'published', [
+        ['dessert', 'Keep Dessert'],
+        ['salad', 'Same Salad'],
+      ]);
+
+      const { id } = await uploadAndValidate([
+        menuRow('2027-03-01', 'Test Main Alpha', 'Test Main Beta', { salad: 'Same Salad' }),
+      ]);
+      db.executedWrites.length = 0;
+      await commit(id);
+
+      expect(
+        db.executedWrites.filter((sql) => /menu_days|menu_options|menu_components/i.test(sql))
+      ).toEqual([]);
+    });
+
+    it('PUBLISHES an unchanged day that is still a draft', async () => {
+      // The case people hit hardest: an earlier import left days unpublished,
+      // and re-uploading the same file must make them live rather than
+      // reporting "already correct" and leaving them invisible.
+      await seedMenu('2027-03-01', 'Test Main Alpha', 'Test Main Beta', 'draft');
+      await seedMenu('2027-03-02', 'Test Main Gamma', 'Test Main Delta', 'draft');
+
+      const { id, body } = await uploadAndValidate([ROW_A, ROW_B]);
+      // Both rows report as already correct...
+      expect(body.data.outcome).toBe('ready');
+      await commit(id);
+
+      // ...and both are now live.
+      expect((await menuDay('2027-03-01'))!.status).toBe('published');
+      expect((await menuDay('2027-03-02'))!.status).toBe('published');
+    });
+
+    it('does not resurrect an unchanged ARCHIVED day', async () => {
+      await seedMenu('2027-03-01', 'Test Main Alpha', 'Test Main Beta', 'archived');
+
+      const { id } = await uploadAndValidate([ROW_A]);
+      await commit(id);
+
+      expect((await menuDay('2027-03-01'))!.status).toBe('archived');
     });
   });
 

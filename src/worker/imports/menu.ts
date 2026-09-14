@@ -29,9 +29,12 @@
  *     that resurrected it would be overruling a decision it cannot see the
  *     reason for. Its dishes are still updated - only its status is untouched.
  *
- * An UNCHANGED row writes nothing at all, status included: the day already
- * matches the workbook, so whatever status it carries is the one somebody
- * chose for it.
+ * An UNCHANGED row writes no DISHES - they already match - but it is still
+ * published if it is sitting in draft. Otherwise "the workbook is the menu"
+ * would be false in the one case people hit hardest: re-uploading a file after
+ * an earlier import left its days unpublished. A day already published produces
+ * no statement at all, so re-importing a settled workbook remains a true
+ * no-op.
  *
  * SHEET SHAPE - one row per calendar day:
  *
@@ -605,9 +608,9 @@ export async function validateMenuWorkbook(
     'Dates this workbook does not mention are left exactly as they are - no menu is removed.'
   );
   fileMessages.push(
-    'Committing PUBLISHES these days: new days go live immediately, and a day still in draft ' +
-      'is published. Employees can select from them as soon as you confirm. A day that was ' +
-      'archived keeps that status, and nothing is ever unpublished.'
+    'Committing PUBLISHES every date in this workbook, including days whose dishes are ' +
+      'already correct but are still in draft. Employees can select from them as soon as you ' +
+      'confirm. A day that was archived keeps that status, and nothing is ever unpublished.'
   );
 
   if (invalidCount > 0) {
@@ -647,23 +650,29 @@ export async function commitMenuWorkbook(db: D1Database, batch: ImportBatch): Pr
     .bind(batch.id)
     .all<{ preview_json: string | null }>();
 
+  // Rows whose DISHES change: these drive the option and component statements.
   const previews: MenuPreview[] = [];
+  // EVERY date the workbook covers, UNCHANGED included. A day whose dishes
+  // already match still has to end up published - "the workbook is the menu"
+  // would not be true if a date in the file stayed invisible because its
+  // dishes happened to be correct already.
+  const coveredDates: string[] = [];
+
   for (const row of staged.results || []) {
     if (!row.preview_json) continue;
     const preview = JSON.parse(row.preview_json) as MenuPreview;
-    if (preview.action === 'INVALID' || preview.action === 'UNCHANGED') continue;
+    if (preview.action === 'INVALID') continue;
+    coveredDates.push(preview.meal_date);
+    if (preview.action === 'UNCHANGED') continue;
     previews.push(preview);
   }
 
-  if (previews.length === 0) return;
+  if (coveredDates.length === 0) return;
 
   // Current state, read once. Ids are NOT needed for inserts: those resolve the
   // menu day by date inside the statement, which is what lets a day and its
   // options land in the SAME batch rather than two.
-  const existing = await loadExisting(
-    db,
-    previews.map((p) => p.meal_date)
-  );
+  const existing = await loadExisting(db, coveredDates);
 
   const statements = [];
 
@@ -679,11 +688,14 @@ export async function commitMenuWorkbook(db: D1Database, batch: ImportBatch): Pr
     );
   }
 
-  // Existing days the workbook CHANGES go live too. Guarded on 'draft' so the
-  // statement can only ever move a day towards published: a published day stays
-  // published, and an archived one is left exactly as it is.
-  for (const preview of previews) {
-    const day = existing.days.get(preview.meal_date);
+  // Every existing day the workbook covers goes live, whether or not its dishes
+  // changed. Guarded on 'draft' so the statement can only ever move a day
+  // towards published: a published day stays published, an archived one is left
+  // exactly as it is - and a day that is ALREADY published produces no
+  // statement at all, which is what keeps re-importing a settled workbook a
+  // true no-op.
+  for (const mealDate of coveredDates) {
+    const day = existing.days.get(mealDate);
     if (!day || day.status !== 'draft') continue;
     statements.push(
       db
@@ -691,7 +703,7 @@ export async function commitMenuWorkbook(db: D1Database, batch: ImportBatch): Pr
           `UPDATE menu_days SET status = 'published'
            WHERE meal_date = ? AND status = 'draft'`
         )
-        .bind(preview.meal_date)
+        .bind(mealDate)
     );
   }
 

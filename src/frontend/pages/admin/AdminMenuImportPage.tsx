@@ -170,8 +170,8 @@ export function AdminMenuImportPage() {
           <p className="panel__note">
             Upload the <strong>lunch</strong> menu workbook (.xlsx), one row per date with{' '}
             <strong>Date</strong>, <strong>Option 1</strong> and <strong>Option 2</strong>, plus the
-            accompaniment columns. Committing the import <strong>publishes</strong> the days it
-            covers, so check the preview carefully. Name the lunch sheet <strong>Lunch</strong>
+            accompaniment columns. Committing the import <strong>publishes</strong> every date
+            it covers, so check the preview carefully. Name the lunch sheet <strong>Lunch</strong>
             if you can; if no
             sheet is named for lunch, one is identified from its contents and you are asked to
             confirm it before anything is imported — a dinner sheet is never read as lunch.
@@ -419,7 +419,8 @@ export function AdminMenuImportPage() {
                 detail={
                   `${current.original_filename}: ${counts.CREATE} new and ${counts.UPDATE} changed ` +
                   `menu day(s); ${counts.UNCHANGED} are already correct and will not be rewritten. ` +
-                  `Committing PUBLISHES these days: employees can select from them straight ` +
+                  `Committing PUBLISHES every date in this workbook - including days already ` +
+                  `correct but still in draft - so employees can select from them straight ` +
                   `away. A day that was archived stays archived, and nothing is ever ` +
                   `unpublished. Dates not in this workbook are left exactly as they are, and ` +
                   `employees' existing lunch selections are never changed.`
