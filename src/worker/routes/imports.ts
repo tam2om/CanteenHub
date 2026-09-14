@@ -41,6 +41,11 @@ import { buildXlsx, XLSX_CONTENT_TYPE, type CellValue } from '../lib/xlsxWrite.j
 import { MEAL_LOCATIONS, MEAL_LOCATION_LABELS } from '../../shared/types/index.js';
 import { MIN_PASSWORD_LENGTH } from '../lib/password.js';
 import { ROSTER_TEMPLATE_VALUES } from '../imports/employees.js';
+import {
+  MAX_DAYS_IN_MONTH,
+  ROSTER_SHEET_NAME,
+  SHIFT_TEMPLATE_VALUES,
+} from '../imports/roster.js';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -512,6 +517,84 @@ app.get('/templates/employees.xlsx', () => {
     headers: {
       'Content-Type': XLSX_CONTENT_TYPE,
       'Content-Disposition': 'attachment; filename="canteenhub-employee-import-template.xlsx"',
+      'Cache-Control': 'no-store',
+    },
+  });
+});
+
+/**
+ * GET /api/admin/imports/templates/roster.xlsx - the blank roster workbook.
+ *
+ * Same reasoning as the employee template: the roster sheet is WIDE and its
+ * shape is easy to get wrong - one row per employee-month, a column per day of
+ * the month, and only three accepted words in the day cells. Handing out the
+ * shape removes the guesswork.
+ *
+ * Generated from the importer's own constants: the sheet name, the accepted
+ * shift words and the day-column count all come from `imports/roster.ts`, so
+ * the template cannot drift from what the parser accepts.
+ */
+app.get('/templates/roster.xlsx', () => {
+  const dayColumns = Array.from({ length: MAX_DAYS_IN_MONTH }, (_, i) => String(i + 1));
+  const headers: CellValue[] = ['ID', 'Month', 'Year', ...dayColumns];
+
+  /** A plausible month of shifts, so the pattern is visible rather than described. */
+  const cycle = (offset: number): CellValue[] =>
+    Array.from({ length: MAX_DAYS_IN_MONTH }, (_, i) => {
+      const day = (i + offset) % 8;
+      if (day < 3) return 'Day';
+      if (day < 6) return 'Night';
+      return 'Off';
+    });
+
+  const rows: CellValue[][] = [
+    headers,
+    ['EXAMPLE001', 'January', 2027, ...cycle(0)],
+    ['EXAMPLE002', 'January', 2027, ...cycle(3)],
+    ['EXAMPLE003', 'January', 2027, ...cycle(6)],
+  ];
+
+  const notes: CellValue[][] = [
+    ['Column', 'Required', 'Accepted values', 'Notes'],
+    [
+      'ID',
+      'Yes',
+      'An ID that already exists',
+      'The roster NEVER creates an employee. Import the employee first; an unknown ID is rejected.',
+    ],
+    ['Month', 'Yes', '1-12, or a month name such as January', 'The month these day columns belong to.'],
+    ['Year', 'Yes', '2000-2100', 'Four digits.'],
+    [
+      '1 - 31',
+      'No',
+      SHIFT_TEMPLATE_VALUES.join(' / '),
+      'One column per day of the month. A BLANK cell means the workbook says nothing about that date - which is NOT the same as Off.',
+    ],
+    [],
+    ['How to use this file'],
+    ['1. Delete the three EXAMPLE rows.'],
+    ['2. Add one row per employee per month. Keep the header row exactly as it is.'],
+    [`3. Keep the sheet named "${ROSTER_SHEET_NAME}".`],
+    ['4. Leave day columns beyond the end of the month empty (for example 30 and 31 in February).'],
+    ['5. Save as .xlsx and upload it on the roster import screen.'],
+    ['6. Check the preview before committing - nothing is written until you confirm.'],
+    [],
+    ['Only Day, Night and Off are accepted. Single letters such as D or N are rejected on purpose,'],
+    ['because a stray letter would otherwise become a real shift silently.'],
+    ['Re-importing the same file is safe: days that have not changed are left alone.'],
+    ['This file is a template. It contains no real employee data.'],
+  ];
+
+  const bytes = buildXlsx([
+    { name: ROSTER_SHEET_NAME, rows, columnWidths: [14, 12, 8] },
+    { name: 'Instructions', rows: notes, columnWidths: [12, 10, 38, 66] },
+  ]);
+
+  return new Response(bytes as unknown as BodyInit, {
+    status: 200,
+    headers: {
+      'Content-Type': XLSX_CONTENT_TYPE,
+      'Content-Disposition': 'attachment; filename="canteenhub-roster-import-template.xlsx"',
       'Cache-Control': 'no-store',
     },
   });

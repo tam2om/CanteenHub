@@ -352,3 +352,137 @@ describe('Employee import template', () => {
     expect(raw).not.toMatch(/AMCO0\d\d/);
   });
 });
+
+// ============================================================================
+// The roster template
+//
+// Same principle as the employee one: the test downloads the file and feeds it
+// back to the importer rather than checking its headings against a list typed
+// out a second time.
+// ============================================================================
+
+describe('Roster import template', () => {
+  let db: TestD1Database;
+  let env: ReturnType<typeof testEnv>;
+  let admin: SeededEmployee;
+  let employee: SeededEmployee;
+
+  beforeEach(async () => {
+    db = createTestDb();
+    env = testEnv(db);
+    admin = await seedEmployee(db, { amcoId: 'TEST697', roleId: ROLE_ADMIN });
+    employee = await seedEmployee(db, { amcoId: 'TEST698' });
+  });
+
+  const download = (cookie: string | null) =>
+    app.request(
+      `${BASE}/api/admin/imports/templates/roster.xlsx`,
+      cookie ? { headers: { Cookie: cookie } } : {},
+      env
+    );
+
+  const uploadRoster = async (buffer: ArrayBuffer) => {
+    const form = new FormData();
+    form.set('import_type', 'roster');
+    form.set('file', new File([buffer], 'roster.xlsx'));
+    const up = await app.request(
+      `${BASE}/api/admin/imports`,
+      { method: 'POST', headers: { Cookie: admin.cookie }, body: form },
+      env
+    );
+    const batch = (await readJson(up)).data as { id: number };
+    return readJson(
+      await app.request(
+        `${BASE}/api/admin/imports/${batch.id}/validate`,
+        { method: 'POST', headers: { Cookie: admin.cookie } },
+        env
+      )
+    );
+  };
+
+  it('is admin-only', async () => {
+    expect((await download(null)).status).toBe(401);
+    expect((await download(employee.cookie)).status).toBe(403);
+  });
+
+  it('downloads as a named .xlsx attachment', async () => {
+    const res = await download(admin.cookie);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe(
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    expect(res.headers.get('Content-Disposition')).toContain(
+      'canteenhub-roster-import-template.xlsx'
+    );
+  });
+
+  it('uses the sheet name the importer looks for', async () => {
+    const buffer = await (await download(admin.cookie)).arrayBuffer();
+    expect(await listWorksheets(buffer)).toEqual(['Shifts roster', 'Instructions']);
+  });
+
+  it('has ID, Month, Year and a column for every day of the month', async () => {
+    const buffer = await (await download(admin.cookie)).arrayBuffer();
+    const sheet = await readWorksheet(buffer, 'Shifts roster');
+    const headers = [...sheet.rows[0].cells.values()];
+
+    expect(headers.slice(0, 3)).toEqual(['ID', 'Month', 'Year']);
+    expect(headers.slice(3)).toEqual(Array.from({ length: 31 }, (_, i) => String(i + 1)));
+  });
+
+  it('VALIDATES CLEANLY once its example employees exist', async () => {
+    // The roster never creates an employee, so the template can only import
+    // against people who are already there. That is the rule, not a defect -
+    // so the test creates them and proves the FORMAT is right.
+    for (const id of ['EXAMPLE001', 'EXAMPLE002', 'EXAMPLE003']) {
+      await seedEmployee(db, { amcoId: id, rosterType: 'shift' });
+    }
+
+    const buffer = await (await download(admin.cookie)).arrayBuffer();
+    const body = await uploadRoster(buffer);
+
+    expect(body.data.outcome).toBe('ready');
+    expect(body.data.invalid_rows).toBe(0);
+    expect(body.data.total_rows).toBe(3);
+  });
+
+  it('explains itself when the example employees do NOT exist', async () => {
+    // Unedited against an empty database: refused, and the message says why
+    // rather than failing on the format.
+    const buffer = await (await download(admin.cookie)).arrayBuffer();
+    const body = await uploadRoster(buffer);
+
+    expect(body.data.outcome).toBe('failed');
+    const detail = await readJson(
+      await app.request(
+        `${BASE}/api/admin/imports/${body.data.id}`,
+        { headers: { Cookie: admin.cookie } },
+        env
+      )
+    );
+    const messages = JSON.stringify(detail.data.preview_rows);
+    expect(messages).toContain('No employee with ID');
+  });
+
+  it('every shift word it uses is one the parser accepts', async () => {
+    const buffer = await (await download(admin.cookie)).arrayBuffer();
+    const sheet = await readWorksheet(buffer, 'Shifts roster');
+
+    const used = new Set<string>();
+    for (const row of sheet.rows.slice(1)) {
+      for (const [index, value] of row.cells) {
+        if (index >= 3 && value) used.add(value);
+      }
+    }
+    // The template shows all three, and nothing else.
+    expect(used).toEqual(new Set(['Day', 'Night', 'Off']));
+  });
+
+  it('contains no real employee data', async () => {
+    const buffer = await (await download(admin.cookie)).arrayBuffer();
+    const sheet = await readWorksheet(buffer, 'Shifts roster');
+    const raw = JSON.stringify(sheet.rows.map((r) => [...r.cells.values()]));
+    expect(raw).toContain('EXAMPLE001');
+    expect(raw).not.toMatch(/AMCO0\d\d/);
+  });
+});
