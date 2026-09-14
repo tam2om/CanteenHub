@@ -609,8 +609,8 @@ describe('Admin menu management', () => {
   // ==========================================================================
 
   describe('import to employee workflow', () => {
-    it('import -> draft -> review -> publish -> employee can select', async () => {
-      // 1. Import a lunch menu. It arrives as a draft.
+    it('import -> published -> correct in place -> employee can select', async () => {
+      // 1. Import a lunch menu. Committing publishes it.
       const form = new FormData();
       form.set('import_type', 'menu');
       form.set(
@@ -629,23 +629,20 @@ describe('Admin menu management', () => {
       await app.request(`${BASE}/api/admin/imports/${batch.id}/validate`, { method: 'POST', headers: { Cookie: admin.cookie } }, env);
       await app.request(`${BASE}/api/admin/imports/${batch.id}/commit`, { method: 'POST', headers: { Cookie: admin.cookie } }, env);
 
-      expect(await menuStatus('2027-03-01')).toBe('draft');
+      expect(await menuStatus('2027-03-01')).toBe('published');
 
-      // 2. It shows up on the admin screen, and is invisible to employees.
+      // 2. It shows on the admin screen and is ALREADY visible to employees -
+      //    the confirm step was the review.
       const month = await readJson(await get('/api/menu/admin/range?month=2027-03'));
       expect(month.data.menus).toHaveLength(1);
       const menuDayId = month.data.menus[0].id;
-      expect((await get('/api/menu/2027-03-01', employee.cookie)).status).toBe(404);
+      expect((await get('/api/menu/2027-03-01', employee.cookie)).status).toBe(200);
 
-      // 3. The admin corrects a typo. Still a draft.
+      // 3. The admin corrects a typo on the live day. It stays published.
       await post(`/api/menu/${menuDayId}/options`, { option_number: 1, name: 'Corrected Alpha' });
-      expect(await menuStatus('2027-03-01')).toBe('draft');
-
-      // 4. The admin publishes deliberately.
-      expect((await put(`/api/menu/${menuDayId}/publish`)).status).toBe(200);
       expect(await menuStatus('2027-03-01')).toBe('published');
 
-      // 5. Now the employee can see it and select.
+      // 4. The employee sees the correction and can select.
       const view = await readJson(await get('/api/menu/2027-03-01', employee.cookie));
       expect(view.data.options.find((o: { option_number: number }) => o.option_number === 1).name)
         .toBe('Corrected Alpha');
@@ -659,7 +656,11 @@ describe('Admin menu management', () => {
       expect(await countRows(db, 'SELECT COUNT(*) as n FROM lunch_selections')).toBe(1);
     });
 
-    it('importing still never publishes on its own', async () => {
+    it('an ARCHIVED day is not resurrected by an import', async () => {
+      await db
+        .prepare("INSERT INTO menu_days (meal_date, status) VALUES ('2027-03-01', 'archived')")
+        .run();
+
       const form = new FormData();
       form.set('import_type', 'menu');
       form.set(
@@ -678,7 +679,11 @@ describe('Admin menu management', () => {
       await app.request(`${BASE}/api/admin/imports/${batch.id}/validate`, { method: 'POST', headers: { Cookie: admin.cookie } }, env);
       await app.request(`${BASE}/api/admin/imports/${batch.id}/commit`, { method: 'POST', headers: { Cookie: admin.cookie } }, env);
 
-      expect(await countRows(db, "SELECT COUNT(*) as n FROM menu_days WHERE status = 'published'")).toBe(0);
+      // Its dishes are updated, but archiving was a deliberate act and stands.
+      expect(await menuStatus('2027-03-01')).toBe('archived');
+      expect(
+        await countRows(db, "SELECT COUNT(*) as n FROM menu_days WHERE status = 'published'")
+      ).toBe(0);
     });
   });
 });

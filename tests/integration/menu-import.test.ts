@@ -455,7 +455,7 @@ describe('Lunch menu Excel import', () => {
       const { id } = await uploadAndValidate([ROW_A]);
       await commit(id);
 
-      expect((await menuDay('2027-03-01'))!.status).toBe('draft');
+      expect((await menuDay('2027-03-01'))!.status).toBe('published');
       expect(await options('2027-03-01')).toEqual([
         { option_number: 1, name: 'Test Main Alpha' },
         { option_number: 2, name: 'Test Main Beta' },
@@ -469,11 +469,36 @@ describe('Lunch menu Excel import', () => {
       ]);
     });
 
-    it('creates new menu days as DRAFT, never published', async () => {
+    it('creates new menu days PUBLISHED, so they are live on commit', async () => {
       const { id } = await uploadAndValidate([ROW_A, ROW_B]);
       await commit(id);
-      expect(await countRows(db, "SELECT COUNT(*) as n FROM menu_days WHERE status = 'draft'")).toBe(2);
-      expect(await countRows(db, "SELECT COUNT(*) as n FROM menu_days WHERE status != 'draft'")).toBe(0);
+      expect(
+        await countRows(db, "SELECT COUNT(*) as n FROM menu_days WHERE status = 'published'")
+      ).toBe(2);
+      expect(
+        await countRows(db, "SELECT COUNT(*) as n FROM menu_days WHERE status <> 'published'")
+      ).toBe(0);
+    });
+
+    it('promotes an existing DRAFT day it changes to published', async () => {
+      await seedMenu('2027-03-01', 'Old Alpha', 'Old Beta', 'draft');
+
+      const { id } = await uploadAndValidate([ROW_A]);
+      await commit(id);
+
+      expect((await menuDay('2027-03-01'))!.status).toBe('published');
+      expect((await options('2027-03-01'))[0].name).toBe('Test Main Alpha');
+    });
+
+    it('NEVER unpublishes, and never resurrects an ARCHIVED day', async () => {
+      await seedMenu('2027-03-01', 'Old Alpha', 'Old Beta', 'archived');
+
+      const { id } = await uploadAndValidate([ROW_A]);
+      await commit(id);
+
+      // The dishes are corrected; the archived decision stands.
+      expect((await menuDay('2027-03-01'))!.status).toBe('archived');
+      expect((await options('2027-03-01'))[0].name).toBe('Test Main Alpha');
     });
 
     it('NEVER changes the status of an existing menu day', async () => {
@@ -790,13 +815,14 @@ describe('Lunch menu Excel import', () => {
   // ==========================================================================
 
   describe('draft safety', () => {
-    it('an imported draft is INVISIBLE to employees and cannot be selected', async () => {
+    it('a day the import leaves ARCHIVED stays invisible to employees', async () => {
       const employee = await seedEmployee(db, { amcoId: 'TEST100', rosterType: 'regular' });
+      await seedMenu('2027-03-01', 'Old Alpha', 'Old Beta', 'archived');
 
       const { id } = await uploadAndValidate([ROW_A]);
       await commit(id);
 
-      expect((await menuDay('2027-03-01'))!.status).toBe('draft');
+      expect((await menuDay('2027-03-01'))!.status).toBe('archived');
 
       // The date is not exposed by the menu API at all.
       const menuRead = await app.request(
@@ -828,21 +854,24 @@ describe('Lunch menu Excel import', () => {
       expect(await countRows(db, 'SELECT COUNT(*) as n FROM lunch_selections')).toBe(0);
     });
 
-    it('the import never issues a publish', async () => {
-      await seedMenu('2027-03-02', 'Test Main Gamma', 'Test Main Delta', 'draft');
+    it('only ever moves a status TOWARDS published, never away from it', async () => {
+      await seedMenu('2027-03-02', 'Test Main Gamma', 'Test Main Delta', 'published');
 
       const { id } = await uploadAndValidate([ROW_A, ROW_B]);
       db.executedWrites.length = 0;
       await commit(id);
 
-      // No statement sets a MENU status. (The import batch's own
-      // pending -> committing -> committed transitions are a different table
-      // and are expected.)
-      const menuStatusWrites = db.executedWrites.filter(
+      // Every statement that touches a menu status sets it to 'published'.
+      // Nothing sets 'draft' or 'archived', so no day can be taken down by an
+      // import however the workbook changes.
+      const statusWrites = db.executedWrites.filter(
         (sql) => /menu_days/i.test(sql) && /status\s*=/i.test(sql)
       );
-      expect(menuStatusWrites).toEqual([]);
-      expect(await countRows(db, "SELECT COUNT(*) as n FROM menu_days WHERE status = 'published'")).toBe(0);
+      for (const sql of statusWrites) {
+        expect(sql).toMatch(/status\s*=\s*'published'|VALUES \(\?, 'published'\)/i);
+        expect(sql).not.toMatch(/status\s*=\s*'(draft|archived)'/i);
+      }
+      expect((await menuDay('2027-03-02'))!.status).toBe('published');
     });
   });
 

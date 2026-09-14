@@ -170,7 +170,9 @@ export function AdminMenuImportPage() {
           <p className="panel__note">
             Upload the <strong>lunch</strong> menu workbook (.xlsx), one row per date with{' '}
             <strong>Date</strong>, <strong>Option 1</strong> and <strong>Option 2</strong>, plus the
-            accompaniment columns. Name the lunch sheet <strong>Lunch</strong> if you can; if no
+            accompaniment columns. Committing the import <strong>publishes</strong> the days it
+            covers, so check the preview carefully. Name the lunch sheet <strong>Lunch</strong>
+            if you can; if no
             sheet is named for lunch, one is identified from its contents and you are asked to
             confirm it before anything is imported — a dinner sheet is never read as lunch.
             Uploading does not change anything on its own.
@@ -417,10 +419,10 @@ export function AdminMenuImportPage() {
                 detail={
                   `${current.original_filename}: ${counts.CREATE} new and ${counts.UPDATE} changed ` +
                   `menu day(s); ${counts.UNCHANGED} are already correct and will not be rewritten. ` +
-                  `New days are created as drafts and an existing day keeps the status it has, so ` +
-                  `nothing is published or unpublished by this import. Dates not in this workbook ` +
-                  `are left exactly as they are, and employees' existing lunch selections are ` +
-                  `never changed.`
+                  `Committing PUBLISHES these days: employees can select from them straight ` +
+                  `away. A day that was archived stays archived, and nothing is ever ` +
+                  `unpublished. Dates not in this workbook are left exactly as they are, and ` +
+                  `employees' existing lunch selections are never changed.`
                 }
                 confirmLabel="Commit import"
                 busy={commitMutation.isPending}
@@ -457,8 +459,8 @@ export function AdminMenuImportPage() {
             updated from {committed.original_filename}.
           </p>
           <p className="panel__note">
-            New menu days are created as drafts — employees cannot select from a day until it is
-            published, and this import never publishes one.
+            These days are <strong>published</strong> — employees can select from them now. To
+            take one down again, archive it on the menu screen.
           </p>
           <div className="panel__actions">
             <button type="button" className="button button--primary" onClick={reset}>
