@@ -446,7 +446,12 @@ function ImportFlow({ kind }: { kind: ImportType }) {
       )}
 
       {/* ---------------- step 5: result ---------------- */}
-      {committed && kind === 'employees' && file && <ImportPasswordStep file={file} />}
+      {/* Passwords are a SEPARATE step from the import, and this card is the
+          only thing that applies them - so it is always here for employees,
+          not only in the moments after a commit while the uploaded file
+          happens to still be in memory. Seeded with that file when there is
+          one; otherwise the administrator picks the workbook themselves. */}
+      {kind === 'employees' && <ImportPasswordStep file={file ?? undefined} />}
 
       {committed && <CompleteStep kind={kind} committed={committed} counts={counts} days={days} onReset={reset} />}
 
@@ -917,7 +922,9 @@ function CompleteStep({
             updated from {committed.original_filename}.
           </p>
           <p className="panel__note">
-            Newly created employees cannot sign in until you set a password for them.
+            Nobody can sign in yet. An import never sets a password, even when the workbook has a
+            Password column — use <strong>Set passwords from a workbook</strong> above to apply
+            them.
           </p>
         </>
       )}

@@ -15,6 +15,13 @@
  * audited, already revoking that employee's sessions. Nothing new is trusted and
  * no plaintext is ever persisted server-side.
  *
+ * AVAILABLE AT ANY TIME, not only in the moments after a commit. It used to
+ * render only while the just-uploaded File was still in the import page's
+ * state, so an administrator who committed an import and then looked away had
+ * no way to apply the passwords in their workbook at all - and re-importing did
+ * not help, because the import has never set a password. That is why it also
+ * takes a file of its own.
+ *
  * HANDLING OF THE PLAINTEXT: passwords live in this component's memory only for
  * as long as the run takes, are sent over HTTPS one at a time, and are dropped
  * when it finishes. They are never put in a URL, written to storage, logged, or
@@ -33,7 +40,8 @@ const PASSWORD_ALIASES = ['password', 'initial password', 'temporary password'];
 const AMCO_ALIASES = ['id', 'id#', 'amco id#', 'amco id', 'amco_id', 'amcoid', 'employee id', 'code'];
 
 interface Props {
-  file: File;
+  /** The workbook just imported, when there is one. Otherwise the administrator picks one. */
+  file?: File;
   sheetName?: string;
   onDone?: () => void;
 }
@@ -75,12 +83,20 @@ export function ImportPasswordStep({ file, sheetName, onDone }: Props) {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
+  const [chosen, setChosen] = useState<File | null>(null);
+
+  // The workbook just imported, or one the administrator picks here.
+  const source = file ?? chosen;
 
   const run = async () => {
     setError(null);
+    if (!source) {
+      setError('Choose the workbook that carries the passwords.');
+      return;
+    }
     setRunning(true);
     try {
-      const passwords = await readPasswords(file, sheetName);
+      const passwords = await readPasswords(source, sheetName);
       if (passwords.size === 0) {
         setError('No password column was found in this workbook, or no row carries a password.');
         setRunning(false);
@@ -152,12 +168,35 @@ export function ImportPasswordStep({ file, sheetName, onDone }: Props) {
 
   return (
     <section className="card">
-      <h2 className="card__title">Set passwords from this workbook</h2>
+      <h2 className="card__title">Set passwords from a workbook</h2>
       <p className="panel__note">
-        The import creates employees without passwords. If your workbook has a{' '}
-        <strong>Password</strong> column, this sets each one now. Passwords are read from the file
-        in your browser and sent one at a time; they are never stored in the import record.
+        <strong>Importing a workbook never sets a password</strong>, however many the file
+        carries — this step does, and it is the only thing that does. Run it whenever you like,
+        on the workbook you just imported or on any other: passwords are read from the file in
+        your browser and sent one at a time, and are never stored in the import record. An
+        employee whose password is set here can sign in immediately.
       </p>
+
+      {!file && (
+        <div className="field">
+          <label className="field__label" htmlFor="password-workbook">
+            Workbook with a Password column
+          </label>
+          <input
+            id="password-workbook"
+            className="field__input"
+            type="file"
+            accept=".xlsx"
+            disabled={running}
+            onChange={(e) => {
+              setChosen(e.target.files?.[0] ?? null);
+              setProgress(null);
+              setError(null);
+            }}
+          />
+          {chosen && <p className="panel__note">Selected: {chosen.name}</p>}
+        </div>
+      )}
 
       {progress && (
         <>
@@ -190,7 +229,7 @@ export function ImportPasswordStep({ file, sheetName, onDone }: Props) {
             type="button"
             className="button button--primary"
             onClick={run}
-            disabled={running}
+            disabled={running || !source}
           >
             {running ? 'Setting passwords…' : 'Set passwords from workbook'}
           </button>
