@@ -156,6 +156,149 @@ describe('Applying passwords from an employee workbook', () => {
     expect(screen.getByText(/never sets a password/i)).toBeInTheDocument();
   });
 
+  /**
+   * A real run of 253 employees set 143 and then Cloudflare answered 503 for
+   * the remaining 110: three requests in flight, each costing the Worker a
+   * deliberate ~57 ms of hashing, was more than the platform would carry. A
+   * temporary refusal must not be reported to an administrator as a failed
+   * password.
+   */
+  it('rides out a 503 and sets the password anyway', async () => {
+    const user = userEvent.setup();
+    let attempts = 0;
+    const fetchSpy = stubFetchExact({
+      [`${EMPLOYEES}?page=1&page_size=100`]: listPage([{ id: 11, amco_id: 'TEST100' }]),
+      [`PUT ${EMPLOYEES}/11/password`]: {
+        get status() {
+          attempts += 1;
+          return attempts === 1 ? 503 : 200;
+        },
+        body: { employee_id: 11, amco_id: 'TEST100', password_set: true, sessionsRevoked: 0 },
+      },
+    });
+
+    renderWithProviders(<ImportPasswordStep file={workbook([ROW_A])} />);
+    await user.click(screen.getByRole('button', { name: /Set passwords/ }));
+
+    expect(await screen.findByText(/Finished: 1 of 1/, {}, { timeout: 10000 })).toBeInTheDocument();
+    expect(passwordPuts(fetchSpy)).toHaveLength(2); // refused once, then accepted
+    expect(screen.queryByText(/TEST100:/)).not.toBeInTheDocument();
+  }, 15000);
+
+  it('does NOT retry a refusal the server actually decided', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = stubFetchExact({
+      [`${EMPLOYEES}?page=1&page_size=100`]: listPage([{ id: 11, amco_id: 'TEST100' }]),
+      [`PUT ${EMPLOYEES}/11/password`]: fail(400, 'Password must be at least 5 characters'),
+    });
+
+    renderWithProviders(<ImportPasswordStep file={workbook([ROW_A])} />);
+    await user.click(screen.getByRole('button', { name: /Set passwords/ }));
+
+    await waitFor(() => expect(screen.getByText(/Finished: 0 of 1/)).toBeInTheDocument());
+    // One attempt, not four: repeating a 400 only repeats the same answer.
+    expect(passwordPuts(fetchSpy)).toHaveLength(1);
+    expect(screen.getByText(/TEST100: Password must be at least 5 characters/)).toBeInTheDocument();
+  });
+
+  it('sends one request at a time, never overlapping', async () => {
+    const user = userEvent.setup();
+    let inFlight = 0;
+    let maxInFlight = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = (init?.method ?? 'GET').toUpperCase();
+        if (method === 'PUT') {
+          inFlight += 1;
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          await new Promise((r) => setTimeout(r, 5));
+          inFlight -= 1;
+          return new Response(JSON.stringify({ success: true, data: {} }), { status: 200 });
+        }
+        if (url.includes(`${EMPLOYEES}?`)) {
+          return new Response(
+            JSON.stringify({
+              success: true,
+              data: {
+                employees: [
+                  { id: 11, amco_id: 'TEST100', full_name: 'X', roster_type: 'regular', is_active: 1 },
+                  { id: 12, amco_id: 'TEST101', full_name: 'X', roster_type: 'regular', is_active: 1 },
+                ],
+                total: 2,
+              },
+            }),
+            { status: 200 }
+          );
+        }
+        return new Response(JSON.stringify({ success: false, error: 'Not Found' }), { status: 404 });
+      })
+    );
+
+    renderWithProviders(<ImportPasswordStep file={workbook([ROW_A, ROW_B])} />);
+    await user.click(screen.getByRole('button', { name: /Set passwords/ }));
+
+    expect(await screen.findByText(/Finished: 2 of 2/)).toBeInTheDocument();
+    expect(maxInFlight).toBe(1);
+  });
+
+  it('offers to retry only the employees that failed', async () => {
+    const user = userEvent.setup();
+    // TEST100 succeeds; TEST101 is refused outright, then accepted on the retry.
+    const puts: Array<{ url: string; password: string }> = [];
+    let betaAttempts = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = (init?.method ?? 'GET').toUpperCase();
+
+        if (method === 'PUT') {
+          puts.push({ url, password: JSON.parse(String(init?.body)).password });
+          if (url.endsWith('/12/password')) {
+            betaAttempts += 1;
+            if (betaAttempts === 1) {
+              return jsonResponse(400, {
+                success: false,
+                error: 'Password must be at least 5 characters',
+              });
+            }
+          }
+          return jsonResponse(200, { success: true, data: { password_set: true } });
+        }
+
+        if (url.includes(`${EMPLOYEES}?`)) {
+          return jsonResponse(200, {
+            success: true,
+            data: {
+              employees: [
+                { id: 11, amco_id: 'TEST100', full_name: 'X', roster_type: 'regular', is_active: 1 },
+                { id: 12, amco_id: 'TEST101', full_name: 'X', roster_type: 'regular', is_active: 1 },
+              ],
+              total: 2,
+            },
+          });
+        }
+
+        return jsonResponse(404, { success: false, error: 'Not Found' });
+      })
+    );
+
+    renderWithProviders(<ImportPasswordStep file={workbook([ROW_A, ROW_B])} />);
+    await user.click(screen.getByRole('button', { name: /Set passwords/ }));
+    await waitFor(() => expect(screen.getByText(/Finished: 1 of 2/)).toBeInTheDocument());
+    expect(screen.getByText(/TEST101: Password must be at least 5 characters/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Retry the 1 that failed/ }));
+    expect(await screen.findByText(/Finished: 1 of 1/)).toBeInTheDocument();
+
+    // The retry touched ONLY the employee that failed, with their own password.
+    expect(puts.slice(2)).toEqual([
+      { url: `${EMPLOYEES}/12/password`, password: 'fixture-pass-b' },
+    ]);
+  });
+
   it('says so when the workbook carries no password column', async () => {
     const user = userEvent.setup();
     stubPasswordRoutes([{ id: 11, amco_id: 'TEST100' }]);
@@ -236,6 +379,13 @@ function stubFetchExact(routes: Record<string, { status?: number; body: unknown 
   });
   vi.stubGlobal('fetch', impl);
   return impl;
+}
+
+function jsonResponse(status: number, body: unknown) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
 
 function passwordPuts(spy: ReturnType<typeof vi.fn>) {

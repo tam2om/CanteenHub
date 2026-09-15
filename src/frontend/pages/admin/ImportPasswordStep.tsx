@@ -22,6 +22,14 @@
  * not help, because the import has never set a password. That is why it also
  * takes a file of its own.
  *
+ * PACED AND RETRIED, because hashing is expensive on a Worker that is allowed
+ * very little CPU per request. Three requests in flight at once got 143 of 253
+ * employees set and then Cloudflare shed the rest with 503s - a run that looks
+ * like a failure but is really the platform saying "slower". Requests now go
+ * one at a time, and a 503, 429 or dropped connection is retried with a
+ * widening gap rather than counted as a refusal. A genuine refusal - a password
+ * the policy rejects, an employee who does not exist - is NOT retried.
+ *
  * HANDLING OF THE PLAINTEXT: passwords live in this component's memory only for
  * as long as the run takes, are sent over HTTPS one at a time, and are dropped
  * when it finishes. They are never put in a URL, written to storage, logged, or
@@ -79,6 +87,42 @@ async function readPasswords(file: File, sheetName?: string): Promise<Map<string
   return out;
 }
 
+/**
+ * Gaps before each retry. Widening, and long enough to matter: a Worker shedding
+ * load under sustained hashing needs breathing room, not an immediate second
+ * attempt that adds to the pile.
+ */
+const RETRY_DELAYS_MS = [1000, 3000, 8000];
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Worth trying again, or a real answer?
+ *
+ * 429 and 5xx are the platform saying "not now" - including the 503 that ended
+ * 110 of 253 employees mid-run. A network error (no ApiError at all) is the
+ * same kind of event. Anything the server actually decided - 400 for a password
+ * the policy rejects, 404 for an employee who is not there, 401 for an expired
+ * session - is an answer, and retrying it just repeats a refusal.
+ */
+function isTransient(error: unknown): boolean {
+  if (error instanceof ApiError) return error.status === 429 || error.status >= 500;
+  return true;
+}
+
+/** Set one password, riding out a temporarily overloaded Worker. */
+async function setPasswordWithRetry(id: number, password: string): Promise<void> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await setEmployeePassword(id, password);
+      return;
+    } catch (error) {
+      if (attempt >= RETRY_DELAYS_MS.length || !isTransient(error)) throw error;
+      await sleep(RETRY_DELAYS_MS[attempt]);
+    }
+  }
+}
+
 export function ImportPasswordStep({ file, sheetName, onDone }: Props) {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -88,7 +132,14 @@ export function ImportPasswordStep({ file, sheetName, onDone }: Props) {
   // The workbook just imported, or one the administrator picks here.
   const source = file ?? chosen;
 
-  const run = async () => {
+  /**
+   * Apply the workbook's passwords.
+   *
+   * `only` restricts the run to a set of AMCO IDs, which is how "retry the ones
+   * that failed" works: the workbook is read again and just those rows are
+   * sent, so a transient failure never means starting the whole file over.
+   */
+  const run = async (only?: Set<string>) => {
     setError(null);
     if (!source) {
       setError('Choose the workbook that carries the passwords.');
@@ -122,39 +173,33 @@ export function ImportPasswordStep({ file, sheetName, onDone }: Props) {
         if (page > 200) break;
       }
 
-      const entries = [...passwords.entries()];
+      const entries = [...passwords.entries()].filter(([amcoId]) => !only || only.has(amcoId));
       const failed: Progress['failed'] = [];
       let done = 0;
       setProgress({ total: entries.length, done, failed, finished: false });
 
-      // One request per employee, a few at a time. Each is a single hash on the
-      // server, which is what the CPU budget allows; the small pool keeps a
-      // large workbook from taking minutes without flooding the Worker.
-      const POOL = 3;
-      let cursor = 0;
-      const worker = async () => {
-        while (cursor < entries.length) {
-          const index = cursor++;
-          const [amcoId, password] = entries[index];
-          const id = idByAmco.get(amcoId);
-          if (id === undefined) {
-            failed.push({ amcoId, reason: 'No employee with this ID exists.' });
-          } else {
-            try {
-              await setEmployeePassword(id, password);
-            } catch (err) {
-              failed.push({
-                amcoId,
-                reason: err instanceof ApiError ? err.message : 'The password could not be set.',
-              });
-            }
+      // ONE REQUEST AT A TIME. Each one costs the server a deliberate ~57 ms of
+      // hashing, and three in flight was enough for Cloudflare to start
+      // refusing them outright. Sequential is slower to watch and is the only
+      // version that finishes.
+      for (const [amcoId, password] of entries) {
+        const id = idByAmco.get(amcoId);
+        if (id === undefined) {
+          failed.push({ amcoId, reason: 'No employee with this ID exists.' });
+        } else {
+          try {
+            await setPasswordWithRetry(id, password);
+          } catch (err) {
+            failed.push({
+              amcoId,
+              reason: err instanceof ApiError ? err.message : 'The password could not be set.',
+            });
           }
-          done += 1;
-          setProgress({ total: entries.length, done, failed: [...failed], finished: false });
         }
-      };
+        done += 1;
+        setProgress({ total: entries.length, done, failed: [...failed], finished: false });
+      }
 
-      await Promise.all(Array.from({ length: Math.min(POOL, entries.length) }, worker));
       setProgress({ total: entries.length, done, failed: [...failed], finished: true });
       onDone?.();
     } catch (err) {
@@ -175,6 +220,12 @@ export function ImportPasswordStep({ file, sheetName, onDone }: Props) {
         on the workbook you just imported or on any other: passwords are read from the file in
         your browser and sent one at a time, and are never stored in the import record. An
         employee whose password is set here can sign in immediately.
+      </p>
+      <p className="panel__note">
+        They are sent one at a time, so a large workbook takes a few minutes —
+        about a second per employee. Leave this screen open until it finishes.
+        Running it again is safe: a password that is set again is simply set to
+        the same value.
       </p>
 
       {!file && (
@@ -223,18 +274,34 @@ export function ImportPasswordStep({ file, sheetName, onDone }: Props) {
         </p>
       )}
 
-      {!progress?.finished && (
-        <div className="panel__actions">
+      <div className="panel__actions">
+        {!progress?.finished && (
           <button
             type="button"
             className="button button--primary"
-            onClick={run}
+            onClick={() => void run()}
             disabled={running || !source}
           >
             {running ? 'Setting passwords…' : 'Set passwords from workbook'}
           </button>
-        </div>
-      )}
+        )}
+
+        {/* A finished run with failures is not the end of the road: re-reading
+            the workbook for just those employees is cheaper and safer than
+            starting the whole file again. */}
+        {progress?.finished && progress.failed.length > 0 && (
+          <button
+            type="button"
+            className="button button--primary"
+            onClick={() => void run(new Set(progress.failed.map((f) => f.amcoId)))}
+            disabled={running}
+          >
+            {running
+              ? 'Setting passwords…'
+              : `Retry the ${progress.failed.length} that failed`}
+          </button>
+        )}
+      </div>
     </section>
   );
 }
