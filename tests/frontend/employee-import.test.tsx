@@ -555,8 +555,13 @@ describe('Employee import - commit', () => {
     expect(await screen.findByRole('status')).toHaveTextContent(
       '1 employee created and 1 updated from synthetic-employees.xlsx.'
     );
+    // The completion panel must say that the import set no passwords, and the
+    // step that does set them must be on the screen: an administrator who
+    // believes the Password column was applied ends up with a workforce that
+    // cannot sign in.
+    expect(screen.getByText(/An import never sets a password/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/cannot sign in until you set a password for them/i)
+      screen.getByRole('heading', { name: /Set passwords from a workbook/i })
     ).toBeInTheDocument();
     expect(
       fetchMock.mock.calls.filter(([url]) => String(url) === commitPath(BATCH_ID))
