@@ -363,6 +363,34 @@ describe('Employee Excel import', () => {
       expect(updated!.roster_type).toBe('regular');
     });
 
+    /**
+     * Ids are compared case-insensitively everywhere else, so a workbook
+     * writing "test100" for the stored "TEST100" is classified as an UPDATE of
+     * that employee. The commit has to find the same row the validator did: a
+     * case-sensitive `WHERE amco_id = ?` matches nothing, changes nothing, and
+     * reports the import as committed - the administrator's edit vanishes with
+     * no error anywhere.
+     */
+    it('updates an employee whose stored ID differs in case from the workbook', async () => {
+      const seeded = await seedEmployee(db, {
+        amcoId: 'TEST100',
+        fullName: 'Old Name',
+        rosterType: 'shift',
+      });
+
+      const { id } = await uploadAndValidate([
+        ['test100', 'Alpha Person', 'Mining', 'Operations', 'Regular'],
+      ]);
+      expect((await commit(id)).status).toBe(200);
+
+      const updated = await employeeRow('TEST100');
+      expect(updated!.id).toBe(seeded.id);
+      expect(updated!.full_name).toBe('Alpha Person');
+      expect(updated!.roster_type).toBe('regular');
+      // And no second employee was created under the other spelling.
+      expect(await countRows(db, "SELECT COUNT(*) as n FROM employees WHERE amco_id COLLATE NOCASE = 'TEST100'")).toBe(1);
+    });
+
     it('PRESERVES an existing password across an update', async () => {
       const target = await seedEmployee(db, { amcoId: 'TEST100', fullName: 'Old Name' });
       await setEmployeePasswordDirect(db, target.id, 'original-password-here');

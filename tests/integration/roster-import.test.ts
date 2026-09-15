@@ -381,6 +381,45 @@ describe('Shift roster Excel import', () => {
       expect((await previewRows(id))[0].messages.join(' ')).toContain('ID is missing');
     });
 
+    /**
+     * The bug that stopped a real September roster: ids are compared
+     * case-insensitively, so a workbook writing "test100" for the stored
+     * "TEST100" validated cleanly - and then the commit looked the employee up
+     * by the workbook's own spelling, found nothing, and refused the ENTIRE
+     * import with "an employee referenced by this import no longer exists".
+     * Three lowercase ids out of 190 were enough to make the file
+     * unimportable, with no way for an administrator to tell why.
+     *
+     * Validation and commit must agree, so this test carries a lowercase id
+     * all the way through to a roster row.
+     */
+    it('commits a row whose ID case differs from the stored employee', async () => {
+      const { id, body } = await uploadAndValidate([
+        rosterRow('test100', MONTH, YEAR, { 1: 'Day', 2: 'Night' }),
+      ]);
+      expect(body.data.outcome).toBe('ready');
+
+      const res = await commit(id);
+      expect(res.status).toBe(200);
+      expect((await entry(shiftWorker.id, '2027-03-01'))!.shift_value).toBe('day');
+      expect((await entry(shiftWorker.id, '2027-03-02'))!.shift_value).toBe('night');
+    });
+
+    it('commits a mixed-case workbook where only SOME ids differ in case', async () => {
+      const other = await seedEmployee(db, { amcoId: 'TEST300', rosterType: 'shift' });
+
+      const { id, body } = await uploadAndValidate([
+        rosterRow('TEST100', MONTH, YEAR, { 1: 'Day' }),
+        rosterRow('test300', MONTH, YEAR, { 1: 'Night' }),
+      ]);
+      expect(body.data.outcome).toBe('ready');
+
+      const res = await commit(id);
+      expect(res.status).toBe(200);
+      expect((await entry(shiftWorker.id, '2027-03-01'))!.shift_value).toBe('day');
+      expect((await entry(other.id, '2027-03-01'))!.shift_value).toBe('night');
+    });
+
     it('imports a roster for a REGULAR employee without objecting', async () => {
       // The importer records roster data; eligibility decides what it means.
       const regular = await seedEmployee(db, { amcoId: 'TEST200', rosterType: 'regular' });
@@ -760,6 +799,103 @@ describe('Shift roster Excel import', () => {
 
       db.executedWrites.length = 0;
       await commit(second.id);
+      expect(db.executedWrites.filter((sql) => /roster_entries/i.test(sql))).toEqual([]);
+    });
+  });
+
+  // ==========================================================================
+  // SCALE - the size a real month actually is
+  // ==========================================================================
+
+  describe('a real-sized month', () => {
+    /**
+     * The September 2026 roster an administrator actually uploaded: 190
+     * employees x 30 days = 5,700 entries.
+     *
+     * The first implementation sent one INSERT per entry in a single
+     * `db.batch()`. Every unit test passed - they all used one or two
+     * employees - and D1 refused the real thing outright, so no real roster
+     * could be imported at all. This test is that workbook's size, and it is
+     * the only kind of test that could have caught it.
+     */
+    const EMPLOYEES = 190;
+    const DAYS = 30;
+
+    const seedBulkEmployees = async (count: number) => {
+      const ids: number[] = [];
+      for (let i = 0; i < count; i += 1) {
+        const amcoId = `BULK${String(i).padStart(4, '0')}`;
+        const res = await db
+          .prepare(
+            `INSERT INTO employees (amco_id, full_name, roster_type, is_active)
+             VALUES (?, ?, 'shift', 1)`
+          )
+          .bind(amcoId, `Bulk Worker ${i}`)
+          .run();
+        ids.push(Number(res.meta.last_row_id));
+      }
+      return ids;
+    };
+
+    it('imports 190 employees x 30 days, and writes them in bounded statements', async () => {
+      const employeeIds = await seedBulkEmployees(EMPLOYEES);
+
+      const rows = [];
+      for (let i = 0; i < EMPLOYEES; i += 1) {
+        const days: Record<number, string> = {};
+        for (let day = 1; day <= DAYS; day += 1) {
+          days[day] = ['Day', 'Night', 'Off'][(i + day) % 3];
+        }
+        rows.push(rosterRow(`BULK${String(i).padStart(4, '0')}`, 9, 2026, days));
+      }
+
+      const { id, body } = await uploadAndValidate(rows);
+      expect(body.data.outcome).toBe('ready');
+
+      db.executedWrites.length = 0;
+      const res = await commit(id);
+      expect(res.status).toBe(200);
+      expect((await readJson(res)).data.status).toBe('committed');
+
+      // Every entry landed.
+      const count = await db
+        .prepare('SELECT count(*) AS n FROM roster_entries')
+        .first<{ n: number }>();
+      expect(count!.n).toBe(EMPLOYEES * DAYS);
+
+      // Spot-check a value rather than trusting the count alone.
+      const first = await entry(employeeIds[0], '2026-09-01');
+      expect(first!.shift_value).toBe('night');
+      expect(first!.source).toBe('import');
+
+      // The point of the test: 5,700 entries must NOT become 5,700 statements.
+      // 25 entries per statement is the most D1's 100-parameter ceiling allows
+      // with four columns, so this is the floor, and anything near one
+      // statement per entry is the bug returning.
+      const writes = db.executedWrites.filter((sql) => /INSERT INTO roster_entries/i.test(sql));
+      expect(writes.length).toBe(Math.ceil((EMPLOYEES * DAYS) / 25));
+      for (const sql of writes) {
+        expect((sql.match(/\?/g) || []).length).toBeLessThanOrEqual(100);
+      }
+    });
+
+    it('re-importing the same real-sized month writes nothing at all', async () => {
+      await seedBulkEmployees(EMPLOYEES);
+
+      const rows = [];
+      for (let i = 0; i < EMPLOYEES; i += 1) {
+        const days: Record<number, string> = {};
+        for (let day = 1; day <= DAYS; day += 1) days[day] = 'Day';
+        rows.push(rosterRow(`BULK${String(i).padStart(4, '0')}`, 9, 2026, days));
+      }
+
+      const first = await uploadAndValidate(rows);
+      await commit(first.id);
+
+      const second = await uploadAndValidate(rows);
+      db.executedWrites.length = 0;
+      await commit(second.id);
+
       expect(db.executedWrites.filter((sql) => /roster_entries/i.test(sql))).toEqual([]);
     });
   });

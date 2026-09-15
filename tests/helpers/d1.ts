@@ -25,7 +25,23 @@ const MIGRATIONS_DIR = path.resolve(here, '../../migrations');
 
 type Row = Record<string, unknown>;
 
+/**
+ * D1 refuses a statement carrying more than 100 bound parameters, and answers
+ * "too many SQL variables". node:sqlite happily accepts thousands, so without
+ * this check a test suite can pass on SQL that can never run in production -
+ * which is exactly how a roster import that no real workbook could survive
+ * reached users. Enforced here so every query in every test is held to the
+ * platform's real limit.
+ */
+const D1_MAX_BOUND_PARAMS = 100;
+
 function normalizeBindings(values: unknown[]): unknown[] {
+  if (values.length > D1_MAX_BOUND_PARAMS) {
+    throw new Error(
+      `too many SQL variables: ${values.length} bound parameters exceeds D1's limit of ${D1_MAX_BOUND_PARAMS}`
+    );
+  }
+
   // node:sqlite rejects booleans and undefined; D1 accepts them.
   return values.map((v) => {
     if (typeof v === 'boolean') return v ? 1 : 0;

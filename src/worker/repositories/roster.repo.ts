@@ -326,7 +326,65 @@ export async function deleteRosterEntry(
 }
 
 /**
- * Bulk insert roster entries (for imports)
+ * D1 rejects a statement carrying more than 100 bound parameters.
+ */
+const D1_MAX_BOUND_PARAMS = 100;
+
+/** Columns bound per roster entry: employee_id, work_date, shift_value, source. */
+const PARAMS_PER_ENTRY = 4;
+
+/**
+ * Entries per INSERT statement, derived from the two constants above rather
+ * than written as a literal, so adding a fifth column narrows the chunk instead
+ * of silently breaking the import.
+ */
+export const ROSTER_ENTRIES_PER_STATEMENT = Math.floor(D1_MAX_BOUND_PARAMS / PARAMS_PER_ENTRY);
+
+/**
+ * Statements per `db.batch()` call.
+ *
+ * A real month of roster is enormous by D1's standards: 190 employees x 30 days
+ * is 5,700 entries. The first version of this function sent ONE STATEMENT PER
+ * ENTRY in a single batch - 5,700 statements, about 1.4 MB of SQL text - and
+ * D1 refused the whole call, so a real September roster could never be
+ * imported at all. Multi-row INSERTs cut that 25-fold; this ceiling keeps each
+ * batch near the largest size known to work in production (a 253-statement
+ * employee import) instead of trusting an undocumented one.
+ */
+export const ROSTER_STATEMENTS_PER_BATCH = 200;
+
+/**
+ * Thrown when a multi-batch write fails after at least one batch has already
+ * committed.
+ *
+ * Callers must not tell an administrator "no partial data was kept" in that
+ * case, because it would not be true. Re-applying the same file is safe: every
+ * statement is an upsert keyed on (employee_id, work_date).
+ */
+export class PartialRosterWriteError extends Error {
+  readonly entriesWritten: number;
+
+  constructor(entriesWritten: number, cause: unknown) {
+    super(
+      `Roster write failed after ${entriesWritten} entr(ies) had already been committed: ` +
+        (cause instanceof Error ? cause.message : String(cause))
+    );
+    this.name = 'PartialRosterWriteError';
+    this.entriesWritten = entriesWritten;
+  }
+}
+
+/**
+ * Bulk upsert roster entries (for imports).
+ *
+ * Every statement is `INSERT ... ON CONFLICT(employee_id, work_date) DO UPDATE`,
+ * so re-running the same import is idempotent and no employee row - or anything
+ * that cascades from one - is ever deleted. `deleted_at` is cleared on conflict
+ * so a previously removed day comes back rather than staying invisible.
+ *
+ * Throws on failure; a failed `db.batch()` has committed nothing from that
+ * batch. If earlier batches did land, the error is a `PartialRosterWriteError`
+ * carrying how many entries are already written.
  */
 export async function bulkInsertRosterEntries(
   db: D1Database,
@@ -336,35 +394,54 @@ export async function bulkInsertRosterEntries(
     shift_value: ShiftValue;
     source: ImportSource;
   }>
-): Promise<{ inserted: number; errors: Array<{ employee_id: number; work_date: string; error: string }> }> {
-  let inserted = 0;
-  const errors: Array<{ employee_id: number; work_date: string; error: string }> = [];
-  
-  const stmt = db.prepare(`
-    INSERT INTO roster_entries (employee_id, work_date, shift_value, source)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(employee_id, work_date) DO UPDATE SET
-      shift_value = excluded.shift_value,
-      source = excluded.source,
-      updated_at = datetime('now'),
-      deleted_at = NULL
-  `);
-  
-  const batch = entries.map(e => [e.employee_id, e.work_date, e.shift_value, e.source]);
-  const results = await db.batch(batch.map(args => stmt.bind(...args)));
-  
-  results.forEach((result, index) => {
-    if (result.success) {
-      inserted++;
-    } else {
-      const entry = entries[index];
-      errors.push({
-        employee_id: entry.employee_id,
-        work_date: entry.work_date,
-        error: (result as { error?: { message?: string } }).error?.message || 'Unknown error'
-      });
+): Promise<{ inserted: number }> {
+  if (entries.length === 0) return { inserted: 0 };
+
+  // Build the multi-row statements first, so the chunking is visible in one
+  // place and the batching below is only about how many to send at a time.
+  const statements = [];
+  for (let i = 0; i < entries.length; i += ROSTER_ENTRIES_PER_STATEMENT) {
+    const chunk = entries.slice(i, i + ROSTER_ENTRIES_PER_STATEMENT);
+    const values = chunk.map(() => '(?, ?, ?, ?)').join(', ');
+    const binds: Array<string | number> = [];
+    for (const entry of chunk) {
+      binds.push(entry.employee_id, entry.work_date, entry.shift_value, entry.source);
     }
-  });
-  
-  return { inserted, errors };
+
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO roster_entries (employee_id, work_date, shift_value, source)
+           VALUES ${values}
+           ON CONFLICT(employee_id, work_date) DO UPDATE SET
+             shift_value = excluded.shift_value,
+             source = excluded.source,
+             updated_at = datetime('now'),
+             deleted_at = NULL`
+        )
+        .bind(...binds)
+    );
+  }
+
+  let inserted = 0;
+  for (let i = 0; i < statements.length; i += ROSTER_STATEMENTS_PER_BATCH) {
+    const group = statements.slice(i, i + ROSTER_STATEMENTS_PER_BATCH);
+    // Entries covered by this group, so a partial failure can say how much
+    // landed rather than guessing.
+    const covered = Math.min(
+      entries.length - i * ROSTER_ENTRIES_PER_STATEMENT,
+      group.length * ROSTER_ENTRIES_PER_STATEMENT
+    );
+
+    try {
+      await db.batch(group);
+    } catch (error) {
+      if (inserted > 0) throw new PartialRosterWriteError(inserted, error);
+      throw error;
+    }
+
+    inserted += covered;
+  }
+
+  return { inserted };
 }

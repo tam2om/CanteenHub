@@ -211,12 +211,36 @@ async function loadExistingEntries(
   return found;
 }
 
-/** Resolve AMCO IDs to employee rows, batched for the same reason. */
+/** An employee row as this importer needs it. */
+interface RosterEmployee {
+  id: number;
+  amco_id: string;
+}
+
+/**
+ * Resolve an ID to an employee, the way ids are compared everywhere else in
+ * CanteenHub: case-insensitively.
+ */
+export type EmployeeLookup = (amcoId: string) => RosterEmployee | undefined;
+
+/**
+ * Resolve AMCO IDs to employee rows, batched for the same reason.
+ *
+ * Returns a LOOKUP FUNCTION rather than the Map it builds. The map's keys are
+ * normalized and its callers' ids are not, so a plain `map.get(workbookId)`
+ * compiles, reads correctly, and quietly misses every id whose case differs
+ * from the stored one. It did: a real 190-employee roster containing three ids
+ * typed in lowercase validated cleanly - validation normalized - and then
+ * failed at commit with "an employee referenced by this import no longer
+ * exists", which was both wrong and unfixable by the administrator. Making the
+ * normalization part of the lookup is the only version of this that cannot be
+ * got wrong at one call site and right at the other.
+ */
 async function loadEmployeesByAmcoId(
   db: D1Database,
   amcoIds: string[]
-): Promise<Map<string, { id: number; amco_id: string }>> {
-  const found = new Map<string, { id: number; amco_id: string }>();
+): Promise<EmployeeLookup> {
+  const found = new Map<string, RosterEmployee>();
   const CHUNK = 90;
 
   for (let i = 0; i < amcoIds.length; i += CHUNK) {
@@ -237,7 +261,7 @@ async function loadEmployeesByAmcoId(
     }
   }
 
-  return found;
+  return (amcoId: string) => found.get(amcoId.trim().toUpperCase());
 }
 
 /**
@@ -398,7 +422,7 @@ export async function validateRosterWorkbook(
     // An unknown employee is never created from a roster file.
     let employeeId: number | null = null;
     if (row.amcoId && AMCO_ID_PATTERN.test(row.amcoId)) {
-      const employee = employees.get(row.amcoId.toUpperCase());
+      const employee = employees(row.amcoId);
       if (!employee) {
         errors.push(
           `No employee with ID "${row.amcoId}" exists. Import the employee first; a roster file never creates one.`
@@ -586,9 +610,11 @@ export async function validateRosterWorkbook(
  *
  * Writing goes through `bulkInsertRosterEntries`, the repository's existing
  * import path, rather than hand-rolled SQL. That function performs an
- * ON CONFLICT(employee_id, work_date) DO UPDATE inside a single `db.batch()`:
- * no DELETE, no INSERT OR REPLACE, so employee rows and every row that
- * cascades from them are untouched.
+ * ON CONFLICT(employee_id, work_date) DO UPDATE: no DELETE, no
+ * INSERT OR REPLACE, so employee rows and every row that cascades from them
+ * are untouched. It chunks the work into multi-row statements because a real
+ * month of roster is thousands of entries and D1 will not accept them one
+ * statement at a time.
  */
 export async function commitRosterWorkbook(db: D1Database, batch: ImportBatch): Promise<void> {
   const staged = await db
@@ -616,7 +642,7 @@ export async function commitRosterWorkbook(db: D1Database, batch: ImportBatch): 
 
   const entries: PendingEntry[] = [];
   for (const preview of previews) {
-    const employee = employees.get(preview.amco_id);
+    const employee = employees(preview.amco_id);
     if (!employee) {
       // Validation proved this employee existed. If they are gone by commit
       // time, fail closed rather than silently dropping their roster.
@@ -635,14 +661,10 @@ export async function commitRosterWorkbook(db: D1Database, batch: ImportBatch): 
 
   if (entries.length === 0) return;
 
-  const result = await bulkInsertRosterEntries(
+  // Throws on failure, which is what the import service needs: a commit that
+  // did not fully land must be recorded as commit_failed, never as success.
+  await bulkInsertRosterEntries(
     db,
     entries.map((entry) => ({ ...entry, source: 'import' as const }))
   );
-
-  if (result.errors.length > 0) {
-    // The batch is transactional, so nothing landed. Surface the failure so the
-    // service marks the import commit_failed rather than reporting success.
-    throw new Error(`${result.errors.length} roster entr(ies) could not be written.`);
-  }
 }
