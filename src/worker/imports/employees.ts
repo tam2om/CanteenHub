@@ -506,10 +506,15 @@ export async function commitEmployeeWorkbook(db: D1Database, batch: ImportBatch)
       statements.push(
         db
           .prepare(
+            // COLLATE NOCASE, matching how the VALIDATOR found this employee.
+            // Without it a workbook writing "amco069" for the stored "AMCO069"
+            // is classified as an UPDATE and then updates nothing at all: zero
+            // rows matched, no error, and an import that reports success while
+            // silently discarding the administrator's edit.
             `UPDATE employees
              SET full_name = ?, department = ?, section = ?, roster_type = ?,
                  default_location = ?, updated_at = datetime('now')
-             WHERE amco_id = ?`
+             WHERE amco_id COLLATE NOCASE = ?`
           )
           .bind(
             preview.full_name,

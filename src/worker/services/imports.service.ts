@@ -26,6 +26,7 @@ import {
   type ImportBatch,
   type StagedRowInput,
 } from '../repositories/imports.repo.js';
+import { PartialRosterWriteError } from '../repositories/roster.repo.js';
 
 /**
  * Which worksheet a validator read, and on whose authority.
@@ -348,11 +349,32 @@ export async function commitImport(
   try {
     await committer(db, batch);
   } catch (error) {
-    console.error('Import commit failed for batch', batchId, error instanceof Error ? error.name : 'unknown');
+    // The message, not just the name. A commit that fails leaves an
+    // administrator with nothing but this record to work from, and "unknown"
+    // cost a day of diagnosis the first time a real roster was rejected.
+    // Committers bind roster shifts, menu names and employee identity - never a
+    // credential - so a database error message carries nothing secret.
+    const detail = error instanceof Error ? error.message : 'unknown error';
+    console.error('Import commit failed for batch', batchId, detail);
+
+    // Whether anything landed is the committer's to say. Claiming "no partial
+    // data was kept" after a multi-batch write had already committed some of it
+    // would be a lie an administrator would act on.
+    const partial = error instanceof PartialRosterWriteError;
+    const written = partial ? error.entriesWritten : 0;
     await transitionStatus(db, batchId, 'committing', 'commit_failed', {
-      failureReason: 'The import could not be applied. No partial data was kept.',
+      failureReason: partial
+        ? `The import could not be applied in full. ${written} entr(ies) were already ` +
+          'written; uploading the same file again is safe and will finish the job. ' +
+          `Reason: ${detail}`
+        : `The import could not be applied. No partial data was kept. Reason: ${detail}`,
     });
-    return { kind: 'failed', reason: 'The import could not be applied.' };
+    return {
+      kind: 'failed',
+      reason: partial
+        ? 'The import could not be applied in full. Uploading the same file again is safe and will finish the job.'
+        : 'The import could not be applied.',
+    };
   }
 
   const finished = await transitionStatus(db, batchId, 'committing', 'committed', {
