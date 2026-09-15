@@ -26,6 +26,21 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
+      # FIRST, before two minutes of checks: a missing token is the one failure
+      # this workflow cannot recover from, and it is invisible until wrangler
+      # dies at the very last step. Three merges to main have already been
+      # "deployed" by a run that was never able to deploy anything. Fail here
+      # instead, with the fix in the error message.
+      - name: Check deploy credentials are configured
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error title=CLOUDFLARE_API_TOKEN is not set::This repository has no CLOUDFLARE_API_TOKEN secret, so main cannot be deployed. Add it under Settings -> Secrets and variables -> Actions -> New repository secret. The token needs Workers Scripts:Edit, D1:Edit and Account Settings:Read on the account that owns canteenhub-prod. Add CLOUDFLARE_ACCOUNT_ID the same way if the token can see more than one account."
+            exit 1
+          fi
+          echo "Credentials present."
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
@@ -53,3 +68,26 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # A successful upload is not the same as a working site. This is the same
+      # check docs/DEPLOYMENT.md asks a human to run afterwards, so a green tick
+      # on this workflow means production actually answered.
+      - name: Verify production is serving
+        run: |
+          set -o pipefail
+          for attempt in 1 2 3 4 5; do
+            body=$(curl -fsS --max-time 20 "$HEALTH_URL") && break
+            echo "Attempt $attempt failed; retrying in 5s."
+            sleep 5
+          done
+          echo "$body"
+          echo "$body" | grep -q '"status":"healthy"' || {
+            echo "::error title=Production is not healthy::$HEALTH_URL did not report healthy after the deploy."
+            exit 1
+          }
+          echo "$body" | grep -q '"database":"connected"' || {
+            echo "::error title=Production cannot reach D1::$HEALTH_URL reported the database as unavailable."
+            exit 1
+          }
+        env:
+          HEALTH_URL: https://canteenhub-prod.tamer-haj.workers.dev/api/health

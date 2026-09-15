@@ -94,7 +94,34 @@ npx wrangler d1 migrations list canteenhub-prod --env production --remote
 
 ## 6. Deploy
 
+### Automatically, on every merge to `main` (the normal path)
+
+`.github/workflows/deploy.yml` runs typecheck, lint and the full test suite,
+applies any new D1 migrations, deploys the Worker, and then asks production's
+own `/api/health` whether it is serving. A green tick means the site answered,
+not merely that an upload succeeded.
+
+It needs one repository secret, added once by someone with admin access to the
+repository — **Settings → Secrets and variables → Actions → New repository
+secret**:
+
+| Secret | Value |
+| --- | --- |
+| `CLOUDFLARE_API_TOKEN` | A Cloudflare API token with **Workers Scripts: Edit**, **D1: Edit** and **Account Settings: Read** on the account that owns `canteenhub-prod`. Create it at *My Profile → API Tokens → Create Token → Custom token*. |
+| `CLOUDFLARE_ACCOUNT_ID` | Only if the token can see more than one account. Harmless to set either way; it is on the Cloudflare dashboard's Workers overview. |
+
+Until that secret exists the workflow stops at its first step and says so.
+Every merge still reports a failed deploy, and **production keeps serving the
+previous version** — a merged pull request is not a released one. After adding
+the secret, re-run the latest workflow run (Actions → Deploy to Cloudflare →
+Re-run jobs) to release whatever is already on `main`; no empty commit needed.
+
+The token is read by two steps only, and wrangler never prints it.
+
+### By hand (fallback, or when CI cannot run)
+
 ```bash
+npm run db:migrate:prod        # apply any new migrations FIRST
 npm run worker:deploy:prod     # builds the SPA, then wrangler deploy --env production
 ```
 
@@ -190,6 +217,8 @@ and each run logs `{"event":"maintenance",...}` with counts only.
 - [ ] `lunch_cutoff_time`, `timezone` and `working_days` reviewed in Settings
 - [ ] Company holidays entered
 - [ ] Custom domain / DNS and SSL, if not using `*.workers.dev`
+- [ ] `CLOUDFLARE_API_TOKEN` added as a repository secret, so merging to
+      `main` actually releases (see section 6)
 
 Timezone is an IANA identifier (`Asia/Amman` by default) and must stay one — a
 fixed UTC offset would be wrong across any DST change. The lunch cutoff is a
