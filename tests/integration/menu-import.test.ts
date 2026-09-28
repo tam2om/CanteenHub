@@ -845,7 +845,11 @@ describe('Lunch menu Excel import', () => {
         {
           method: 'POST',
           headers: { Cookie: employee.cookie, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ meal_date: '2027-03-01', choice: 'option_1' }),
+          body: JSON.stringify({
+            meal_date: '2027-03-01',
+            choice: 'option_1',
+            pickup_location: 'amco_canteen',
+          }),
         },
         env
       );

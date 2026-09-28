@@ -49,13 +49,12 @@ export const fetchHistory = (limit = 30, offset = 0) =>
 export const submitSelection = (
   mealDate: string,
   choice: LunchChoice,
-  pickupLocation?: MealLocation
+  // Required: every meal is collected somewhere, and the server refuses a
+  // selection that does not say where.
+  pickupLocation: MealLocation
 ) =>
   api.post<unknown>('/api/selections/me', {
     meal_date: mealDate,
     choice,
-    // Omitted rather than sent as null when unchanged: the server then keeps
-    // whatever the selection already had, or falls back to the employee's own
-    // default. A null would be a value, and would have to mean something.
-    ...(pickupLocation ? { pickup_location: pickupLocation } : {}),
+    pickup_location: pickupLocation,
   });

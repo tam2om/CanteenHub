@@ -24,6 +24,13 @@ import {
 
 const BASE = 'http://localhost';
 const MEAL_DATE = '2027-03-07'; // Sunday - a configured working day
+/**
+ * The day the ordering window for MEAL_DATE closes. Lunch is chosen a day
+ * ahead, so the configured cutoff applies on the day BEFORE the meal - every
+ * cutoff test fixes the clock here, not on the meal date itself (on which the
+ * window is always already closed, whatever the setting says).
+ */
+const DEADLINE_DAY = '2027-03-06'
 
 describe('Admin settings', () => {
   let db: TestD1Database;
@@ -56,7 +63,7 @@ describe('Admin settings', () => {
     );
 
   const select = (cookie: string, choice = 'option_1', mealDate = MEAL_DATE) =>
-    app.request(`${BASE}/api/selections/me`, jsonRequest({ meal_date: mealDate, choice }, cookie), env);
+    app.request(`${BASE}/api/selections/me`, jsonRequest({ meal_date: mealDate, choice, pickup_location: 'amco_canteen' }, cookie), env);
 
   describe('13. reading settings', () => {
     it('admin reads the current settings', async () => {
@@ -115,7 +122,7 @@ describe('Admin settings', () => {
       await putCutoff('16:00', admin.cookie);
 
       // 09:00 UTC is 12:00 in Asia/Amman, before a 16:00 cutoff.
-      vi.setSystemTime(new Date(`${MEAL_DATE}T09:00:00Z`));
+      vi.setSystemTime(new Date(`${DEADLINE_DAY}T09:00:00Z`));
 
       const res = await select(employee.cookie);
       expect(res.status).toBe(201);
@@ -125,7 +132,7 @@ describe('Admin settings', () => {
       await putCutoff('11:00', admin.cookie);
 
       // 09:00 UTC is 12:00 in Asia/Amman, past an 11:00 cutoff.
-      vi.setSystemTime(new Date(`${MEAL_DATE}T09:00:00Z`));
+      vi.setSystemTime(new Date(`${DEADLINE_DAY}T09:00:00Z`));
 
       const res = await select(employee.cookie);
       expect(res.status).toBe(400);
@@ -136,7 +143,7 @@ describe('Admin settings', () => {
     it('the cutoff is read dynamically: the same instant flips with the setting', async () => {
       // One fixed instant, two different configured cutoffs, two outcomes.
       // This is what proves the value is not baked into the code path.
-      vi.setSystemTime(new Date(`${MEAL_DATE}T09:00:00Z`)); // 12:00 Amman
+      vi.setSystemTime(new Date(`${DEADLINE_DAY}T09:00:00Z`)); // 12:00 Amman
 
       await putCutoff('11:00', admin.cookie);
       expect((await select(employee.cookie)).status).toBe(400);
@@ -150,10 +157,22 @@ describe('Admin settings', () => {
 
       // 12:30 UTC is 15:30 in Amman - past a 14:00 Amman cutoff, but still
       // before it if the comparison were (wrongly) made in UTC.
-      vi.setSystemTime(new Date(`${MEAL_DATE}T12:30:00Z`));
+      vi.setSystemTime(new Date(`${DEADLINE_DAY}T12:30:00Z`));
 
       const res = await select(employee.cookie);
       expect(res.status).toBe(400);
+    });
+
+    it('the meal date itself is always closed, whatever the setting says', async () => {
+      // A cutoff at the very end of the day, and a clock early on the meal
+      // date. Under the old same-day rule this was open; the kitchen now needs
+      // the order the day before.
+      await putCutoff('23:59', admin.cookie);
+      vi.setSystemTime(new Date(`${MEAL_DATE}T04:00:00Z`)); // 07:00 Amman
+
+      const res = await select(employee.cookie);
+      expect(res.status).toBe(400);
+      expect((await readJson(res)).error).toMatch(/a day ahead/i);
     });
   });
 

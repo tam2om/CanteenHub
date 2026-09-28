@@ -204,7 +204,7 @@ describe('Admin navigation', () => {
       date: '2027-03-01', timezone: 'Asia/Amman',
       menu: { exists: false, published: false, status: null },
       totals: { employees_considered: 0, eligible: 0, not_eligible: 0 },
-      selections: { option_1: 0, option_2: 0, no_preference: 0, eligible_not_selected: 0, ineligible_with_selection: 0 },
+      selections: { option_1: 0, option_2: 0, healthy: 0, defaulted_to_option_1: 0, ineligible_with_selection: 0 },
       eligibility: { by_reason: [] }, not_eligible: { by_reason: [] },
     }),
     '/api/menu/admin/range': ok({ month: '2027-03', from: '2027-03-01', to: '2027-03-31', today: '2027-03-07', menus: [] }),
@@ -297,7 +297,7 @@ describe('Admin UX invariants', () => {
         date: '2027-03-01', timezone: 'Asia/Amman',
         menu: { exists: true, published: true, status: 'published' },
         totals: { employees_considered: 0, eligible: 0, not_eligible: 0 },
-        selections: { option_1: 0, option_2: 0, no_preference: 0, eligible_not_selected: 0, ineligible_with_selection: 0 },
+        selections: { option_1: 0, option_2: 0, healthy: 0, defaulted_to_option_1: 0, ineligible_with_selection: 0 },
         eligibility: { by_reason: [] }, not_eligible: { by_reason: [] },
       }),
     });
@@ -307,7 +307,7 @@ describe('Admin UX invariants', () => {
     const items = within(section).getAllByRole('listitem').map((i) => i.textContent?.replace(/\s+/g, ' ').trim());
 
     // A zero portion count is information, not an absence of it.
-    expect(items).toEqual(['0 Option 1', '0 Option 2', '0 No preference', '0 Eligible, not selected']);
+    expect(items).toEqual(['0 Option 1', '0 Option 2', '0 Healthy meal', '0 of Option 1 not chosen']);
   });
 
   it('mutation failures are announced, not merely displayed', async () => {

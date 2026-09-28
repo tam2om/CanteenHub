@@ -14,13 +14,17 @@ import type {
   AdminEmployee,
   CreateEmployeeInput,
   MealLocation,
+  MealPreference,
   RosterType,
   UpdateEmployeeInput,
 } from '../../types/index.js';
 import {
   DEFAULT_MEAL_LOCATION,
+  DEFAULT_MEAL_PREFERENCE,
   MEAL_LOCATIONS,
   MEAL_LOCATION_LABELS,
+  MEAL_PREFERENCES,
+  MEAL_PREFERENCE_LABELS,
 } from '../../types/index.js';
 
 interface Props {
@@ -45,6 +49,9 @@ export function EmployeeFormPanel({ mode, employee, onClose }: Props) {
   const [rosterType, setRosterType] = useState<RosterType>(employee?.roster_type ?? 'regular');
   const [location, setLocation] = useState<MealLocation>(
     employee?.default_location ?? DEFAULT_MEAL_LOCATION
+  );
+  const [mealPreference, setMealPreference] = useState<MealPreference>(
+    employee?.meal_preference ?? DEFAULT_MEAL_PREFERENCE
   );
   const [roleId, setRoleId] = useState<number>(employee?.role_id ?? 1);
   const { user } = useSession();
@@ -78,6 +85,7 @@ export function EmployeeFormPanel({ mode, employee, onClose }: Props) {
         section: section.trim() || null,
         roster_type: rosterType,
         default_location: location,
+        meal_preference: mealPreference,
         // Sent only when it actually changes, so an administrator editing a
         // name never re-asserts a role - and the server's super-administrator
         // guard is never triggered by an edit that was not about roles.
@@ -94,6 +102,7 @@ export function EmployeeFormPanel({ mode, employee, onClose }: Props) {
       section: section.trim() || null,
       roster_type: rosterType,
       default_location: location,
+      meal_preference: mealPreference,
       ...(roleId !== 1 ? { role_id: roleId } : {}),
     };
     create.mutate(input, { onSuccess: onClose });
@@ -184,6 +193,29 @@ export function EmployeeFormPanel({ mode, employee, onClose }: Props) {
               </option>
             ))}
           </select>
+        </label>
+
+        {/* WHAT this person eats. An employee on the healthy meal does not
+            choose between the menu options at all - their daily meal is fixed
+            and their own screen offers nothing to change - so this control is
+            the only way in or out of it. */}
+        <label className="field">
+          <span className="field__label">Meal</span>
+          <select
+            className="field__input"
+            name="meal_preference"
+            value={mealPreference}
+            onChange={(e) => setMealPreference(e.target.value as MealPreference)}
+          >
+            {MEAL_PREFERENCES.map((value) => (
+              <option key={value} value={value}>
+                {MEAL_PREFERENCE_LABELS[value]}
+              </option>
+            ))}
+          </select>
+          <span className="field__hint">
+            An employee on the healthy meal gets it every day and cannot change it themselves.
+          </span>
         </label>
 
         {/* Role. The super administrator option is offered only to a super

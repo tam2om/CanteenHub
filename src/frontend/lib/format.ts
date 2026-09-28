@@ -34,7 +34,7 @@ export function formatShortDate(date: string): string {
 export const CHOICE_LABELS: Record<LunchChoice, string> = {
   option_1: 'Option 1',
   option_2: 'Option 2',
-  no_preference: 'No Preference',
+  healthy: 'Healthy meal',
 };
 
 export function formatChoice(choice: LunchChoice | null): string {
@@ -54,7 +54,9 @@ export const SOURCE_LABELS: Record<SelectionSource, string> = {
  * explains the situation without exposing internals.
  */
 export const ELIGIBILITY_MESSAGES: Record<EligibilityReason, string> = {
-  REGULAR_WORKING_DAY: 'You are eligible for lunch today.',
+  // Never "today": the screen is always about a future meal date, which it
+  // names for itself. A message that said "today" would contradict it.
+  REGULAR_WORKING_DAY: 'You are eligible for lunch on this date.',
   SHIFT_DAY: 'You are on a day shift and eligible for lunch.',
   SHIFT_NIGHT: 'You are on a night shift and eligible for lunch.',
   REGULAR_NON_WORKING_DAY: 'This is not one of your working days, so no meal is provided.',

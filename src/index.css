@@ -147,7 +147,15 @@ a:hover { color: var(--navy); }
 }
 .identity__name { margin: 0; font: 700 1.5rem/1.2 var(--font-display), sans-serif; letter-spacing: -0.01em; }
 .identity__meta { margin: 0.2rem 0 0; color: var(--muted); font-size: 0.875rem; }
+/* Two dates, and their difference is the point: the big one is the day being
+   ordered (always ahead), the small one is today. */
+.identity__dates { text-align: right; }
 .identity__date { margin: 0; font: 600 0.9375rem/1.2 var(--font-body), sans-serif; color: var(--accent); }
+.identity__today { margin: 0.2rem 0 0; font-size: 0.8125rem; color: var(--muted); }
+
+@media (max-width: 30rem) {
+  .identity__dates { text-align: left; }
+}
 
 .card {
   background: var(--surface);
@@ -238,6 +246,11 @@ a:hover { color: var(--navy); }
 
 /* Picked but not sent. Dashed border and a hollow tick so an unsubmitted
    choice never looks like the one the kitchen holds. */
+/* Decided for this employee by an administrator: it looks selected because it
+   IS their meal, but it is not a control - no hover, no pointer. */
+.choice--fixed { cursor: default; }
+.choice--fixed:hover { border-color: var(--accent); }
+
 .choice--unsent { border-style: dashed; }
 .choice--unsent .choice__state { background: transparent; color: var(--accent); border: 2px solid var(--accent); }
 

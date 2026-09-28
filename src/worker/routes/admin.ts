@@ -27,7 +27,12 @@ import { toPublicEmployee, toPublicEmployees } from '../lib/employeeView.js';
 import { isValidBusinessDate } from '../lib/datetime.js';
 import { getAllSettings, getCurrentBusinessDate, getSetting, updateSetting } from '../services/settings.service.js';
 import { buildLunchReport, buildLunchReportDetail } from '../services/reports.service.js';
-import { isMealLocation, MEAL_LOCATIONS } from '../../shared/types/index.js';
+import {
+  isMealLocation,
+  isMealPreference,
+  MEAL_LOCATIONS,
+  MEAL_PREFERENCES,
+} from '../../shared/types/index.js';
 import { buildXlsx, XLSX_CONTENT_TYPE, type CellValue } from '../lib/xlsxWrite.js';
 import { listHolidays, upsertHoliday, deleteHoliday } from '../repositories/holidays.repo.js';
 import {
@@ -134,7 +139,10 @@ app.post('/employees', async (c) => {
   const actorId = c.get('session')!.employee_id;
 
   const body = await c.req.json();
-  const { amco_id, full_name, department, section, roster_type, role_id, default_location } = body;
+  const {
+    amco_id, full_name, department, section, roster_type, role_id, default_location,
+    meal_preference,
+  } = body;
 
   if (!amco_id || typeof amco_id !== 'string' || amco_id.trim().length === 0) {
     return c.json({ success: false, error: 'amco_id is required' }, 400);
@@ -151,6 +159,14 @@ app.post('/employees', async (c) => {
   if (default_location !== undefined && !isMealLocation(default_location)) {
     return c.json(
       { success: false, error: `default_location must be one of: ${MEAL_LOCATIONS.join(', ')}` },
+      400
+    );
+  }
+  // Who eats the healthy meal is an ADMINISTRATOR's decision, which is why it
+  // is set here on the employee and nowhere on the employee's own screens.
+  if (meal_preference !== undefined && !isMealPreference(meal_preference)) {
+    return c.json(
+      { success: false, error: `meal_preference must be one of: ${MEAL_PREFERENCES.join(', ')}` },
       400
     );
   }
@@ -176,6 +192,7 @@ app.post('/employees', async (c) => {
       roster_type,
       role_id,
       default_location,
+      meal_preference,
     });
 
     const publicEmployee = toPublicEmployee(employee);
@@ -212,7 +229,9 @@ app.put('/employees/:id', async (c) => {
   }
 
   const body = await c.req.json();
-  const { full_name, department, section, roster_type, role_id, default_location } = body;
+  const {
+    full_name, department, section, roster_type, role_id, default_location, meal_preference,
+  } = body;
 
   if (full_name !== undefined && (typeof full_name !== 'string' || full_name.trim().length === 0)) {
     return c.json({ success: false, error: 'full_name cannot be empty' }, 400);
@@ -226,6 +245,12 @@ app.put('/employees/:id', async (c) => {
   if (default_location !== undefined && !isMealLocation(default_location)) {
     return c.json(
       { success: false, error: `default_location must be one of: ${MEAL_LOCATIONS.join(', ')}` },
+      400
+    );
+  }
+  if (meal_preference !== undefined && !isMealPreference(meal_preference)) {
+    return c.json(
+      { success: false, error: `meal_preference must be one of: ${MEAL_PREFERENCES.join(', ')}` },
       400
     );
   }
@@ -248,6 +273,7 @@ app.put('/employees/:id', async (c) => {
     ...(roster_type !== undefined ? { roster_type } : {}),
     ...(role_id !== undefined ? { role_id } : {}),
     ...(default_location !== undefined ? { default_location } : {}),
+    ...(meal_preference !== undefined ? { meal_preference } : {}),
   });
 
   if (!updated) {
@@ -548,26 +574,29 @@ app.get('/reports/lunch.xlsx', async (c) => {
   const CHOICE_LABELS: Record<string, string> = {
     option_1: 'Option 1',
     option_2: 'Option 2',
-    no_preference: 'No preference',
+    healthy: 'Healthy meal',
   };
 
+  // "Of which defaulted" is the last column deliberately: it is not a portion
+  // to cook, it is a note about how many of the Option 1 portions were nobody's
+  // decision. The kitchen loads the trolley from Total portions.
   const totals: CellValue[][] = [
-    ['Canteen', 'Option 1', 'Option 2', 'No preference', 'Total portions', 'Eligible, not selected'],
+    ['Canteen', 'Option 1', 'Option 2', 'Healthy meal', 'Total portions', 'Of which not chosen'],
     ...report.by_location.map((row) => [
       row.label,
       row.option_1,
       row.option_2,
-      row.no_preference,
+      row.healthy,
       row.total,
-      row.eligible_not_selected,
+      row.defaulted_to_option_1,
     ]),
     [
       'All canteens',
       report.selections.option_1,
       report.selections.option_2,
-      report.selections.no_preference,
-      report.selections.option_1 + report.selections.option_2 + report.selections.no_preference,
-      report.selections.eligible_not_selected,
+      report.selections.healthy,
+      report.selections.option_1 + report.selections.option_2 + report.selections.healthy,
+      report.selections.defaulted_to_option_1,
     ],
     [],
     ['Lunch report', date],
@@ -579,8 +608,15 @@ app.get('/reports/lunch.xlsx', async (c) => {
     ['Selections held by ineligible employees', report.selections.ineligible_with_selection],
   ];
 
+  // TWO meal columns, because they answer different questions. "Served" is what
+  // to put on the tray; "Chose" says whether that was the employee's own
+  // decision, so "not chosen" against an Option 1 row is visible per person and
+  // not only in the totals.
   const detailRows: CellValue[][] = [
-    ['ID', 'Name', 'Department', 'Section', 'Roster', 'Eligible', 'Reason', 'Choice', 'Canteen'],
+    [
+      'ID', 'Name', 'Department', 'Section', 'Roster', 'Eligible', 'Reason',
+      'Served', 'Chose', 'Canteen',
+    ],
     ...detail.map((row) => [
       row.amco_id,
       row.full_name,
@@ -589,14 +625,21 @@ app.get('/reports/lunch.xlsx', async (c) => {
       row.roster_type,
       row.eligible ? 'Yes' : 'No',
       row.reason_label,
-      row.choice ? (CHOICE_LABELS[row.choice] ?? row.choice) : '',
+      row.served ? (CHOICE_LABELS[row.served] ?? row.served) : '',
+      row.meal_preference === 'healthy'
+        ? 'Healthy meal (set by admin)'
+        : row.choice
+          ? (CHOICE_LABELS[row.choice] ?? row.choice)
+          : row.eligible
+            ? 'Not chosen'
+            : '',
       row.location_label,
     ]),
   ];
 
   const bytes = buildXlsx([
-    { name: 'Totals', rows: totals, columnWidths: [26, 10, 10, 15, 15, 22] },
-    { name: 'Detail', rows: detailRows, columnWidths: [12, 28, 22, 22, 10, 9, 26, 15, 16] },
+    { name: 'Totals', rows: totals, columnWidths: [26, 10, 10, 14, 15, 20] },
+    { name: 'Detail', rows: detailRows, columnWidths: [12, 28, 22, 22, 10, 9, 26, 14, 24, 16] },
   ]);
 
   return new Response(bytes as unknown as BodyInit, {

@@ -47,6 +47,8 @@ export async function seedEmployee(
     department?: string;
     section?: string;
     defaultLocation?: 'amco_canteen' | 'omco_canteen' | 'whc_canteen';
+    /** 'healthy' puts this employee on the healthy meal, as an admin would. */
+    mealPreference?: 'standard' | 'healthy';
   }
 ): Promise<SeededEmployee> {
   const {
@@ -58,15 +60,20 @@ export async function seedEmployee(
     department = 'Test Department',
     section = 'Test Section',
     defaultLocation = 'amco_canteen',
+    mealPreference = 'standard',
   } = options;
 
   const inserted = await db
     .prepare(
       `INSERT INTO employees
-         (amco_id, full_name, department, section, roster_type, is_active, role_id, default_location)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+         (amco_id, full_name, department, section, roster_type, is_active, role_id,
+          default_location, meal_preference)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .bind(amcoId, fullName, department, section, rosterType, isActive ? 1 : 0, roleId, defaultLocation)
+    .bind(
+      amcoId, fullName, department, section, rosterType, isActive ? 1 : 0, roleId,
+      defaultLocation, mealPreference
+    )
     .run();
 
   const id = inserted.meta.last_row_id as number;

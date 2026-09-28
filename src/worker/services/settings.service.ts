@@ -7,6 +7,7 @@ import type { D1Database } from '@cloudflare/workers-types';
 import type { Setting } from '../../shared/types/index.js';
 import {
   DEFAULT_TIMEZONE,
+  addBusinessDays,
   getBusinessDate,
   getBusinessTimeMinutes,
   resolveTimezone,
@@ -116,13 +117,14 @@ export async function getCutoffMinutes(db: D1Database): Promise<number> {
 }
 
 /**
- * Has the selection cutoff passed for the given meal date?
+ * Has the selection deadline passed for the given meal date?
+ *
+ * LUNCH IS ORDERED A DAY AHEAD. The kitchen buys and preps for tomorrow, so the
+ * deadline for a meal on date D is the cutoff time on D MINUS ONE DAY, not on D
+ * itself. Today's lunch is therefore always closed: its deadline was yesterday.
  *
  * Both "what day is it now" and "what time is it now" are resolved through the
- * configured IANA timezone. The previous implementation round-tripped through
- * `toLocaleString('en-US', ...)` and re-parsed the result, which depends on the
- * runtime's locale parsing and on the server's local timezone - it produced the
- * wrong answer near midnight. Nothing here uses a fixed UTC offset.
+ * configured IANA timezone. Nothing here uses a fixed UTC offset.
  */
 export async function isCutoffPassed(db: D1Database, mealDate: BusinessDate): Promise<boolean> {
   const timezone = await getTimezone(db);
@@ -130,18 +132,43 @@ export async function isCutoffPassed(db: D1Database, mealDate: BusinessDate): Pr
   const now = new Date();
 
   const today = getBusinessDate(timezone, now);
-  const comparison = compareBusinessDates(mealDate, today);
+  // The day the ordering window for this meal closes.
+  const deadlineDate = addBusinessDays(mealDate, -1);
+  const comparison = compareBusinessDates(deadlineDate, today);
 
-  // Past meal date: the cutoff necessarily passed.
+  // The deadline day is already behind us.
   if (comparison < 0) {
     return true;
   }
 
-  // Future meal date: the cutoff definitionally has not passed.
+  // The deadline day has not arrived; the window is open.
   if (comparison > 0) {
     return false;
   }
 
-  // Same business day: compare against the wall clock in the business timezone.
+  // Deadline day: compare against the wall clock in the business timezone.
   return getBusinessTimeMinutes(timezone, now) >= cutoffMinutes;
+}
+
+/**
+ * The meal date an employee is choosing for right now.
+ *
+ * Before the cutoff today, tomorrow's lunch is open. Once it passes, tomorrow
+ * is settled and the next thing anyone can order is the day after - so an
+ * employee is never shown a day they cannot act on, and there is no dead window
+ * in which the portal has nothing to offer.
+ *
+ * Whether the employee is ELIGIBLE on that date, and whether a menu is
+ * published for it, are separate questions answered elsewhere. This one only
+ * says which day is being ordered.
+ */
+export async function getSelectableMealDate(
+  db: D1Database,
+  now: Date = new Date()
+): Promise<BusinessDate> {
+  const timezone = await getTimezone(db);
+  const cutoffMinutes = await getCutoffMinutes(db);
+  const today = getBusinessDate(timezone, now);
+  const beforeCutoff = getBusinessTimeMinutes(timezone, now) < cutoffMinutes;
+  return addBusinessDays(today, beforeCutoff ? 1 : 2);
 }

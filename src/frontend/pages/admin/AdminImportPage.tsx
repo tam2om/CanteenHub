@@ -537,8 +537,8 @@ function UploadStep({
           </p>
           <p className="panel__note">
             “Option Meal 1” and “Option Meal 2” are accompaniments served with whichever main is
-            chosen, so they are imported as components. The employee’s choice stays Option 1,
-            Option 2 or No Preference.
+            chosen, so they are imported as components. The employee’s choice stays Option 1 or
+            Option 2.
           </p>
         </>
       )}

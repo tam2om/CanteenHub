@@ -166,7 +166,7 @@ describe('Menu import - upload step', () => {
     expect(await screen.findByRole('heading', { name: 'Import lunch menu' })).toBeInTheDocument();
     expect(screen.getByText(/a dinner sheet is never read as lunch/i)).toBeInTheDocument();
     expect(screen.getByText(/imported as components/i)).toBeInTheDocument();
-    expect(screen.getByText(/Option 1,\s*Option 2 or No Preference/i)).toBeInTheDocument();
+    expect(screen.getByText(/choice stays Option 1 or\s*Option 2/i)).toBeInTheDocument();
   });
 
   it('refuses to upload when no file has been chosen', async () => {

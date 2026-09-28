@@ -1,11 +1,16 @@
 /**
- * The three meal choices.
+ * The meal choices.
  *
  * Rendered as a radio fieldset rather than divs so keyboard navigation and
  * screen-reader grouping come from the platform. Selection state is conveyed by
  * a checkmark and a word as well as colour, since colour alone would fail for a
  * colour-blind employee reading the single most important piece of information
  * on the screen.
+ *
+ * TWO CHOICES, not three. "No preference" is gone: the kitchen still had to
+ * cook something for it, so it was never a preference, only an unanswered
+ * question. An employee who chooses nothing is served Option 1, which the
+ * screen says out loud rather than leaving them to find out at the counter.
  *
  * PICKING IS NOT SUBMITTING. Tapping an option only marks it; the dashboard's
  * Submit button is what sends it. So the tick has to say WHICH of the two states
@@ -14,10 +19,9 @@
  * unsent choice was safely recorded.
  */
 
-import type { LunchChoice } from '../types/index.js';
+import type { LunchChoice, SelectableLunchChoice } from '../types/index.js';
+import { SELECTABLE_LUNCH_CHOICES } from '../types/index.js';
 import { CHOICE_LABELS } from '../lib/format.js';
-
-const CHOICES: LunchChoice[] = ['option_1', 'option_2', 'no_preference'];
 
 interface Props {
   /** What is marked on screen: the unsent pick if there is one, else the saved choice. */
@@ -27,7 +31,13 @@ interface Props {
   disabled: boolean;
   pending: LunchChoice | null;
   optionNames: Partial<Record<LunchChoice, string>>;
-  onSelect: (choice: LunchChoice) => void;
+  onSelect: (choice: SelectableLunchChoice) => void;
+  /**
+   * This employee is on the healthy meal. The options are not rendered at all
+   * rather than rendered disabled: two greyed-out cards invite an employee to
+   * keep tapping something that will never respond.
+   */
+  locked?: boolean;
 }
 
 export function MealSelection({
@@ -37,12 +47,32 @@ export function MealSelection({
   pending,
   optionNames,
   onSelect,
+  locked = false,
 }: Props) {
+  if (locked) {
+    return (
+      <section className="choices" aria-label="Your meal">
+        <p className="choices__legend">Your meal</p>
+        <div className="choice choice--selected choice--fixed">
+          <span className="choice__body">
+            <span className="choice__label">{CHOICE_LABELS.healthy}</span>
+            <span className="choice__dish">
+              Set for you by an administrator. The menu options do not apply.
+            </span>
+          </span>
+          <span className="choice__state" aria-hidden="true">
+            ✓
+          </span>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <fieldset className="choices" disabled={disabled}>
       <legend className="choices__legend">Choose your lunch</legend>
 
-      {CHOICES.map((choice) => {
+      {SELECTABLE_LUNCH_CHOICES.map((choice) => {
         const isSelected = current === choice;
         const isPending = pending === choice;
         // Marked, but not what the server holds: picked and not yet submitted.
@@ -65,9 +95,6 @@ export function MealSelection({
             <span className="choice__body">
               <span className="choice__label">{CHOICE_LABELS[choice]}</span>
               {optionNames[choice] && <span className="choice__dish">{optionNames[choice]}</span>}
-              {choice === 'no_preference' && (
-                <span className="choice__dish">Either option is fine</span>
-              )}
             </span>
             <span className="choice__state" aria-hidden="true">
               {isPending ? '…' : isSelected ? '✓' : ''}

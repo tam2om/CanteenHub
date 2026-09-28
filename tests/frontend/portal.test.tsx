@@ -188,7 +188,9 @@ describe('Dashboard — identity, date and eligibility', () => {
 
     renderWithProviders(<EmployeeDashboard />);
 
-    expect(await screen.findByText('Sunday, 7 March 2027')).toBeInTheDocument();
+    // The server's own business date, shown as "today" - the meal date beside
+    // it is also the server's. Neither is derived from the browser clock.
+    expect(await screen.findByText(/Today is Sunday, 7 March 2027/)).toBeInTheDocument();
     expect(screen.queryByText(/June/)).not.toBeInTheDocument();
     vi.useRealTimers();
   });
@@ -323,10 +325,28 @@ describe('Dashboard — menu', () => {
 });
 
 describe('Dashboard — selection', () => {
+  /** Pick a canteen, which every submission now requires. */
+  const chooseCanteen = async (
+    user: ReturnType<typeof userEvent.setup>,
+    value = 'amco_canteen'
+  ) => {
+    await user.selectOptions(await screen.findByLabelText('Collect from'), value);
+  };
+
+  const savedSelection = (overrides: Record<string, unknown> = {}) => ({
+    id: 1,
+    meal_date: '2027-03-07',
+    choice: 'option_1' as const,
+    pickup_location: 'amco_canteen' as const,
+    source: 'employee' as const,
+    selected_at: '',
+    updated_at: '',
+    ...overrides,
+  });
+
   const choiceCases = [
     ['14. Option 1', 'option_1', /Option 1/],
     ['15. Option 2', 'option_2', /Option 2/],
-    ['16. No Preference', 'no_preference', /No Preference/],
   ] as const;
 
   it.each(choiceCases)('%s can be picked and submitted', async (_label, choice, pattern) => {
@@ -338,21 +358,7 @@ describe('Dashboard — selection', () => {
       [ME]: ok(SESSION_USER),
       [SELECT]: ok({ id: 1, choice }),
       get [TODAY]() {
-        return ok(
-          saved
-            ? {
-                ...payload,
-                selection: {
-                  id: 1,
-                  meal_date: '2027-03-07',
-                  choice,
-                  source: 'employee',
-                  selected_at: '',
-                  updated_at: '',
-                },
-              }
-            : payload
-        );
+        return ok(saved ? { ...payload, selection: savedSelection({ choice }) } : payload);
       },
     });
 
@@ -361,9 +367,27 @@ describe('Dashboard — selection', () => {
     const radio = await screen.findByRole('radio', { name: pattern });
     saved = true;
     await user.click(radio);
+    await chooseCanteen(user);
     await user.click(screen.getByRole('button', { name: 'Submit my choice' }));
 
     expect(await screen.findByRole('status')).toHaveTextContent(/Submitted\./);
+  });
+
+  it('16. No Preference is gone: there are exactly two options', async () => {
+    stubFetch({ [ME]: ok(SESSION_USER), [TODAY]: ok(todayPayload()) });
+    renderWithProviders(<EmployeeDashboard />);
+
+    expect(await screen.findByRole('radio', { name: /Option 1/ })).toBeInTheDocument();
+    expect(screen.getAllByRole('radio')).toHaveLength(2);
+    expect(screen.queryByRole('radio', { name: /No Preference/i })).not.toBeInTheDocument();
+  });
+
+  it('marks Option 1 up front and says it is what silence means', async () => {
+    stubFetch({ [ME]: ok(SESSION_USER), [TODAY]: ok(todayPayload()) });
+    renderWithProviders(<EmployeeDashboard />);
+
+    expect(await screen.findByRole('radio', { name: /Option 1/ })).toBeChecked();
+    expect(screen.getByText(/if you submit nothing at all/i)).toBeInTheDocument();
   });
 
   it('picking an option does not send anything until Submit is pressed', async () => {
@@ -375,43 +399,25 @@ describe('Dashboard — selection', () => {
     });
 
     renderWithProviders(<EmployeeDashboard />);
-    await user.click(await screen.findByRole('radio', { name: /Option 1/ }));
+    await user.click(await screen.findByRole('radio', { name: /Option 2/ }));
+    await chooseCanteen(user);
 
     // Marked on screen, and honest about not being sent.
-    expect(screen.getByRole('radio', { name: /Option 1/ })).toBeChecked();
+    expect(screen.getByRole('radio', { name: /Option 2/ })).toBeChecked();
     expect(screen.getByText(/Not submitted yet/)).toBeInTheDocument();
     expect(
       fetchSpy.mock.calls.some(([url]) => String(url).includes(SELECT))
     ).toBe(false);
 
     await user.click(screen.getByRole('button', { name: 'Submit my choice' }));
-    await screen.findByRole('status');
+    await screen.findByText(/Submitted\./);
     expect(fetchSpy.mock.calls.some(([url]) => String(url).includes(SELECT))).toBe(true);
-  });
-
-  it('with nothing picked and nothing to change, Submit is disabled', async () => {
-    stubFetch({ [ME]: ok(SESSION_USER), [TODAY]: ok(todayPayload()) });
-
-    renderWithProviders(<EmployeeDashboard />);
-
-    expect(await screen.findByRole('button', { name: 'Submit my choice' })).toBeDisabled();
   });
 
   it('17. an existing selection is shown as selected', async () => {
     stubFetch({
       [ME]: ok(SESSION_USER),
-      [TODAY]: ok(
-        todayPayload({
-          selection: {
-            id: 1,
-            meal_date: '2027-03-07',
-            choice: 'option_2',
-            source: 'employee',
-            selected_at: '',
-            updated_at: '',
-          },
-        })
-      ),
+      [TODAY]: ok(todayPayload({ selection: savedSelection({ choice: 'option_2' }) })),
     });
 
     renderWithProviders(<EmployeeDashboard />);
@@ -426,14 +432,11 @@ describe('Dashboard — selection', () => {
 
   it('18. a selection can be changed, and the change is reported', async () => {
     const user = userEvent.setup();
-    const withOption1 = todayPayload({
-      selection: {
-        id: 1, meal_date: '2027-03-07', choice: 'option_1',
-        source: 'employee', selected_at: '', updated_at: '',
-      },
+    stubFetch({
+      [ME]: ok(SESSION_USER),
+      [TODAY]: ok(todayPayload({ selection: savedSelection() })),
+      [SELECT]: ok({ id: 1 }),
     });
-
-    stubFetch({ [ME]: ok(SESSION_USER), [TODAY]: ok(withOption1), [SELECT]: ok({ id: 1 }) });
 
     renderWithProviders(<EmployeeDashboard />);
     await user.click(await screen.findByRole('radio', { name: /Option 2/ }));
@@ -446,14 +449,11 @@ describe('Dashboard — selection', () => {
 
   it('21. re-picking the SAME choice leaves nothing to submit', async () => {
     const user = userEvent.setup();
-    const withOption1 = todayPayload({
-      selection: {
-        id: 1, meal_date: '2027-03-07', choice: 'option_1',
-        source: 'employee', selected_at: '', updated_at: '',
-      },
+    stubFetch({
+      [ME]: ok(SESSION_USER),
+      [TODAY]: ok(todayPayload({ selection: savedSelection() })),
+      [SELECT]: ok({ id: 1 }),
     });
-
-    stubFetch({ [ME]: ok(SESSION_USER), [TODAY]: ok(withOption1), [SELECT]: ok({ id: 1 }) });
 
     renderWithProviders(<EmployeeDashboard />);
     await user.click(await screen.findByRole('radio', { name: /Option 1/ }));
@@ -464,18 +464,14 @@ describe('Dashboard — selection', () => {
 
   it('changing only the canteen is itself a submittable change', async () => {
     const user = userEvent.setup();
-    const withOption1 = todayPayload({
-      selection: {
-        id: 1, meal_date: '2027-03-07', choice: 'option_1',
-        pickup_location: 'amco_canteen',
-        source: 'employee', selected_at: '', updated_at: '',
-      },
+    stubFetch({
+      [ME]: ok(SESSION_USER),
+      [TODAY]: ok(todayPayload({ selection: savedSelection() })),
+      [SELECT]: ok({ id: 1 }),
     });
 
-    stubFetch({ [ME]: ok(SESSION_USER), [TODAY]: ok(withOption1), [SELECT]: ok({ id: 1 }) });
-
     renderWithProviders(<EmployeeDashboard />);
-    await user.selectOptions(await screen.findByLabelText('Collect from'), 'omco_canteen');
+    await chooseCanteen(user, 'omco_canteen');
 
     const submit = screen.getByRole('button', { name: 'Submit my choice' });
     expect(submit).toBeEnabled();
@@ -496,9 +492,124 @@ describe('Dashboard — selection', () => {
 
     renderWithProviders(<EmployeeDashboard />);
     await user.click(await screen.findByRole('radio', { name: /Option 1/ }));
+    await chooseCanteen(user);
     await user.click(screen.getByRole('button', { name: 'Submit my choice' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Selection cutoff time has passed');
+  });
+
+  // ==========================================================================
+  // WHERE the meal is collected - now required
+  // ==========================================================================
+
+  describe('the canteen must be chosen', () => {
+    it('starts with nothing chosen, and will not submit until one is', async () => {
+      const user = userEvent.setup();
+      const fetchSpy = stubFetch({
+        [ME]: ok(SESSION_USER),
+        [TODAY]: ok(todayPayload()),
+        [SELECT]: ok({ id: 1 }),
+      });
+
+      renderWithProviders(<EmployeeDashboard />);
+
+      // NOT pre-filled from the employee's usual canteen: the whole point is
+      // that somebody looks at it.
+      expect(await screen.findByLabelText('Collect from')).toHaveValue('');
+      expect(screen.getByRole('button', { name: 'Submit my choice' })).toBeDisabled();
+      expect(screen.getByText(/Choose where you will collect this meal/i)).toBeInTheDocument();
+
+      await user.click(screen.getByRole('radio', { name: /Option 2/ }));
+      expect(screen.getByRole('button', { name: 'Submit my choice' })).toBeDisabled();
+      expect(fetchSpy.mock.calls.some(([url]) => String(url).includes(SELECT))).toBe(false);
+
+      await chooseCanteen(user, 'whc_canteen');
+      expect(screen.getByRole('button', { name: 'Submit my choice' })).toBeEnabled();
+    });
+
+    it('sends the canteen the employee picked', async () => {
+      const user = userEvent.setup();
+      const fetchSpy = stubFetch({
+        [ME]: ok(SESSION_USER),
+        [TODAY]: ok(todayPayload()),
+        [SELECT]: ok({ id: 1 }),
+      });
+
+      renderWithProviders(<EmployeeDashboard />);
+      await chooseCanteen(user, 'omco_canteen');
+      await user.click(screen.getByRole('button', { name: 'Submit my choice' }));
+      await screen.findByText(/Submitted\./);
+
+      const call = fetchSpy.mock.calls.find(([url]) => String(url).includes(SELECT))!;
+      expect(JSON.parse(String(call[1]?.body))).toMatchObject({
+        choice: 'option_1',
+        pickup_location: 'omco_canteen',
+      });
+    });
+  });
+
+  // ==========================================================================
+  // The healthy meal - decided by an administrator
+  // ==========================================================================
+
+  describe('an employee on the healthy meal', () => {
+    const healthyPayload = () =>
+      todayPayload({
+        choiceLocked: true,
+        employee: { ...todayPayload().employee, meal_preference: 'healthy' },
+      });
+
+    it('is shown their meal and offered no options to change it', async () => {
+      stubFetch({ [ME]: ok(SESSION_USER), [TODAY]: ok(healthyPayload()) });
+      renderWithProviders(<EmployeeDashboard />);
+
+      expect(await screen.findByText('Healthy meal')).toBeInTheDocument();
+      expect(screen.queryAllByRole('radio')).toHaveLength(0);
+      expect(screen.getByText(/Set for you by an administrator/i)).toBeInTheDocument();
+    });
+
+    it('still chooses where to collect it, and submits that', async () => {
+      const user = userEvent.setup();
+      const fetchSpy = stubFetch({
+        [ME]: ok(SESSION_USER),
+        [TODAY]: ok(healthyPayload()),
+        [SELECT]: ok({ id: 1 }),
+      });
+
+      renderWithProviders(<EmployeeDashboard />);
+      await chooseCanteen(user, 'whc_canteen');
+      await user.click(screen.getByRole('button', { name: 'Submit my choice' }));
+      await screen.findByText(/Submitted\./);
+
+      const call = fetchSpy.mock.calls.find(([url]) => String(url).includes(SELECT))!;
+      expect(JSON.parse(String(call[1]?.body))).toMatchObject({
+        choice: 'healthy',
+        pickup_location: 'whc_canteen',
+      });
+    });
+  });
+
+  // ==========================================================================
+  // Lunch is chosen a day ahead
+  // ==========================================================================
+
+  describe('the day being ordered', () => {
+    it('names the meal date, and today separately', async () => {
+      stubFetch({ [ME]: ok(SESSION_USER), [TODAY]: ok(todayPayload()) });
+      renderWithProviders(<EmployeeDashboard />);
+
+      // mealDate is 2027-03-07; businessDate is the day before.
+      expect(await screen.findByText(/Lunch for Sunday, 7 March 2027/)).toBeInTheDocument();
+      expect(screen.getByText(/Today is Saturday, 6 March 2027/)).toBeInTheDocument();
+    });
+
+    it('never claims the meal is today', async () => {
+      stubFetch({ [ME]: ok(SESSION_USER), [TODAY]: ok(todayPayload()) });
+      renderWithProviders(<EmployeeDashboard />);
+      await screen.findByText(/Lunch for Sunday, 7 March 2027/);
+
+      expect(screen.queryByText(/eligible for lunch today/i)).not.toBeInTheDocument();
+    });
   });
 
   it('19. when the cutoff has already passed the choices are disabled', async () => {
@@ -527,6 +638,7 @@ describe('Dashboard — selection', () => {
 
     renderWithProviders(<EmployeeDashboard />);
     await user.click(await screen.findByRole('radio', { name: /Option 1/ }));
+    await chooseCanteen(user);
     await user.click(screen.getByRole('button', { name: 'Submit my choice' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Not eligible: SHIFT_OFF');
@@ -560,7 +672,7 @@ describe('History page', () => {
           },
           {
             id: 1, meal_date: '2027-03-06', previous_choice: null,
-            new_choice: 'no_preference', changed_at: '2027-03-06T06:00:00Z', source: 'employee',
+            new_choice: 'option_1', changed_at: '2027-03-06T06:00:00Z', source: 'employee',
           },
         ],
         total: 2, limit: 30, offset: 0,

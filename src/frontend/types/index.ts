@@ -7,7 +7,6 @@
  */
 
 export type RosterType = 'regular' | 'shift' | 'amman_hq';
-export type LunchChoice = 'option_1' | 'option_2' | 'no_preference';
 export type SelectionSource = 'employee' | 'admin_override' | 'system';
 
 export type EligibilityReason =
@@ -26,9 +25,24 @@ export {
   MEAL_LOCATION_LABELS,
   DEFAULT_MEAL_LOCATION,
   isMealLocation,
+  LUNCH_CHOICES,
+  SELECTABLE_LUNCH_CHOICES,
+  DEFAULT_LUNCH_CHOICE,
+  MEAL_PREFERENCES,
+  MEAL_PREFERENCE_LABELS,
+  DEFAULT_MEAL_PREFERENCE,
 } from '../../shared/types/index.js';
-export type { MealLocation } from '../../shared/types/index.js';
-import type { MealLocation } from '../../shared/types/index.js';
+export type {
+  MealLocation,
+  LunchChoice,
+  SelectableLunchChoice,
+  MealPreference,
+} from '../../shared/types/index.js';
+import type {
+  MealLocation,
+  LunchChoice,
+  MealPreference,
+} from '../../shared/types/index.js';
 
 export interface Employee {
   id: number;
@@ -40,6 +54,8 @@ export interface Employee {
   is_active: boolean | number;
   /** Where this employee normally collects their meal. */
   default_location?: MealLocation;
+  /** Menu options, or the healthy meal. Set by an administrator only. */
+  meal_preference?: MealPreference;
 }
 
 export interface Eligibility {
@@ -85,12 +101,16 @@ export interface Selection {
 /** Payload of GET /api/me/today - everything the dashboard renders. */
 export interface TodayPayload {
   businessDate: string;
+  /** The next date that can still be ordered. Lunch is chosen a day ahead. */
+  selectableDate?: string;
   mealDate: string;
   employee: Employee;
   eligibility: Eligibility;
   menu: Menu | null;
   selection: Selection | null;
   cutoffPassed: boolean;
+  /** This employee is on the healthy meal and does not pick an option. */
+  choiceLocked?: boolean;
   canSelect: boolean;
 }
 
@@ -157,6 +177,7 @@ export interface CreateEmployeeInput {
   roster_type: RosterType;
   role_id?: number;
   default_location?: MealLocation;
+  meal_preference?: MealPreference;
 }
 
 /**
@@ -171,6 +192,7 @@ export interface UpdateEmployeeInput {
   roster_type?: RosterType;
   role_id?: number;
   default_location?: MealLocation;
+  meal_preference?: MealPreference;
 }
 
 /** Response of PUT /api/admin/employees/:id/password - carries no credential. */
@@ -368,8 +390,9 @@ export interface LunchReport {
   selections: {
     option_1: number;
     option_2: number;
-    no_preference: number;
-    eligible_not_selected: number;
+    healthy: number;
+    /** Eligible employees who chose nothing. Already counted inside option_1. */
+    defaulted_to_option_1: number;
     ineligible_with_selection: number;
   };
   eligibility: { by_reason: ReportReasonCount[] };
@@ -383,9 +406,10 @@ export interface ReportLocationCount {
   label: string;
   option_1: number;
   option_2: number;
-  no_preference: number;
+  healthy: number;
   total: number;
-  eligible_not_selected: number;
+  /** How many of this canteen's Option 1 portions nobody actually chose. */
+  defaulted_to_option_1: number;
 }
 
 // ---------------------------------------------------------------------------

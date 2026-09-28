@@ -1,6 +1,11 @@
 /**
- * The employee's main screen: identity, business date, eligibility, menu,
- * selection.
+ * The employee's main screen: identity, the day being ordered, eligibility,
+ * menu, selection.
+ *
+ * THE DAY IS NOT TODAY. Lunch is ordered a day ahead - the kitchen buys and
+ * preps for tomorrow - so this screen is always about a future meal. The server
+ * decides which one (tomorrow before the cutoff, the day after once it has
+ * passed) and the screen names that date everywhere rather than saying "today".
  *
  * Picking and submitting are separate. Tapping an option (or changing the
  * canteen) only marks it locally; nothing reaches the kitchen until Submit is
@@ -20,9 +25,9 @@ import {
 } from '../components/SelectionConfirmation.js';
 import { ErrorState, LoadingState } from '../components/States.js';
 import { formatBusinessDate } from '../lib/format.js';
-import type { LunchChoice, MealLocation } from '../types/index.js';
+import type { LunchChoice, MealLocation, SelectableLunchChoice } from '../types/index.js';
 import {
-  DEFAULT_MEAL_LOCATION,
+  DEFAULT_LUNCH_CHOICE,
   MEAL_LOCATIONS,
   MEAL_LOCATION_LABELS,
 } from '../types/index.js';
@@ -37,9 +42,11 @@ export function EmployeeDashboard() {
   // The unsent pick. null means "nothing picked since the last submit", so the
   // screen falls back to showing what the server holds.
   const [draftChoice, setDraftChoice] = useState<LunchChoice | null>(null);
+  // null means the employee has not chosen a canteen in this visit. It is NOT
+  // pre-filled: see the field below.
   const [chosenLocation, setChosenLocation] = useState<MealLocation | null>(null);
 
-  if (isLoading) return <LoadingState label="Loading today&rsquo;s lunch…" />;
+  if (isLoading) return <LoadingState label="Loading your next lunch…" />;
 
   if (error) {
     return (
@@ -47,7 +54,7 @@ export function EmployeeDashboard() {
         message={
           error instanceof ApiError
             ? error.message
-            : 'We could not load today&rsquo;s lunch. Please try again.'
+            : 'We could not load your next lunch. Please try again.'
         }
       />
     );
@@ -55,36 +62,55 @@ export function EmployeeDashboard() {
 
   if (!data) return <ErrorState message="No data was returned. Please try again." />;
 
-  const { employee, businessDate, eligibility, menu, selection, cutoffPassed, canSelect } = data;
+  const {
+    employee,
+    businessDate,
+    eligibility,
+    menu,
+    selection,
+    cutoffPassed,
+    canSelect,
+    choiceLocked = false,
+  } = data;
 
   const optionNames: Partial<Record<LunchChoice, string>> = {
     option_1: menu?.options.find((o) => o.option_number === 1)?.name,
     option_2: menu?.options.find((o) => o.option_number === 2)?.name,
   };
 
-  // Where the meal will be collected. Seeded from the saved selection if there
-  // is one, otherwise from the employee's own default - so the common case is
-  // already correct and nobody has to choose every day.
   const savedChoice = selection?.choice ?? null;
-  const savedLocation =
-    selection?.pickup_location ?? employee.default_location ?? DEFAULT_MEAL_LOCATION;
+  const savedLocation = selection?.pickup_location ?? null;
+
+  // WHERE the meal is collected must be chosen, every time, and is never
+  // pre-filled from the employee's usual canteen: a value that is already there
+  // is a value nobody reads, and a portion sent to the wrong site is a meal
+  // somebody does not get.
   const location = chosenLocation ?? savedLocation;
-  const markedChoice = draftChoice ?? savedChoice;
 
-  // Something to send: a different meal, or the same meal at a different
-  // canteen (moving where a portion goes is a change the kitchen needs).
+  // WHAT they eat has a default, because everyone entitled to a meal gets one
+  // whether or not they say anything. The screen marks Option 1 up front so the
+  // default is visible rather than discovered at the counter.
+  const markedChoice: LunchChoice = choiceLocked
+    ? 'healthy'
+    : (draftChoice ?? savedChoice ?? DEFAULT_LUNCH_CHOICE);
+
+  // Something to send: nothing submitted yet, a different meal, or the same
+  // meal at a different canteen (moving where a portion goes is a change the
+  // kitchen needs).
   const hasUnsentChange =
-    markedChoice !== null && (markedChoice !== savedChoice || location !== savedLocation);
+    location !== null &&
+    (selection === null || markedChoice !== savedChoice || location !== savedLocation);
 
-  const handleSelect = (choice: LunchChoice) => {
+  const handleSelect = (choice: SelectableLunchChoice) => {
     setDraftChoice(choice);
     setFeedback(null);
   };
 
   const handleSubmit = () => {
-    if (!markedChoice) return;
-    // The server decides whether this is allowed; the button being enabled is a
-    // convenience, never the control.
+    if (!location) return;
+    // The server decides whether this is allowed - and what an employee on the
+    // healthy meal is recorded as. The button being enabled is a convenience,
+    // never the control.
     const choice = markedChoice;
     setPending(choice);
     setFeedback(null);
@@ -122,8 +148,12 @@ export function EmployeeDashboard() {
             {employee.section && ` · ${employee.section}`}
           </p>
         </div>
-        {/* Date comes from the server. The browser never decides what day it is. */}
-        <p className="identity__date">{formatBusinessDate(businessDate)}</p>
+        {/* Both dates come from the server. The browser never decides what day
+            it is, and never derives tomorrow from its own clock. */}
+        <div className="identity__dates">
+          <p className="identity__date">Lunch for {formatBusinessDate(mealDate)}</p>
+          <p className="identity__today">Today is {formatBusinessDate(businessDate)}</p>
+        </div>
       </section>
 
       <EligibilityStatus
@@ -143,10 +173,20 @@ export function EmployeeDashboard() {
             pending={pending}
             optionNames={optionNames}
             onSelect={handleSelect}
+            locked={choiceLocked}
           />
 
-          {/* Where to collect it. Like the meal itself, a change here is only
-              marked until Submit is pressed. */}
+          {!choiceLocked && selection === null && (
+            <p className="panel__note">
+              Option 1 is what you get if you submit nothing at all. Choosing is still worth it —
+              it tells the kitchen this is a real order.
+            </p>
+          )}
+
+          {/* Where to collect it. Required, and deliberately empty until the
+              employee picks: this is the one thing the kitchen cannot work out
+              for itself. Like the meal, a change here is only marked until
+              Submit is pressed. */}
           <div className="field field--location">
             <label className="field__label" htmlFor="pickup-location">
               Collect from
@@ -154,13 +194,16 @@ export function EmployeeDashboard() {
             <select
               id="pickup-location"
               className="field__input"
-              value={location}
+              value={location ?? ''}
+              required
               disabled={!canSelect || select.isPending}
               onChange={(e) => {
-                setChosenLocation(e.target.value as MealLocation);
+                const value = e.target.value;
+                setChosenLocation(value === '' ? null : (value as MealLocation));
                 setFeedback(null);
               }}
             >
+              <option value="">Choose a canteen…</option>
               {MEAL_LOCATIONS.map((value) => (
                 <option key={value} value={value}>
                   {MEAL_LOCATION_LABELS[value]}
@@ -180,6 +223,12 @@ export function EmployeeDashboard() {
             </button>
           </div>
 
+          {canSelect && location === null && !select.isPending && (
+            <p className="feedback feedback--warn" role="status">
+              Choose where you will collect this meal before submitting.
+            </p>
+          )}
+
           <SelectionConfirmation feedback={feedback} />
 
           {hasUnsentChange && !select.isPending && (
@@ -190,7 +239,7 @@ export function EmployeeDashboard() {
 
           {selection && !feedback && !hasUnsentChange && (
             <p className="feedback feedback--muted" role="status">
-              Your current choice is saved.
+              Your choice for {formatBusinessDate(mealDate)} is saved.
               {!cutoffPassed && ' You can change it until the deadline.'}
             </p>
           )}

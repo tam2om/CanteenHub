@@ -109,17 +109,18 @@ function ReportBody({ report }: { report: LunchReport }) {
           <li className="summary__item summary__item--ok">
             <span className="summary__value">{selections.option_2}</span> Option 2
           </li>
-          <li className="summary__item">
-            <span className="summary__value">{selections.no_preference}</span> No preference
+          <li className="summary__item summary__item--ok">
+            <span className="summary__value">{selections.healthy}</span> Healthy meal
           </li>
           <li className="summary__item">
-            <span className="summary__value">{selections.eligible_not_selected}</span> Eligible, not
-            selected
+            <span className="summary__value">{selections.defaulted_to_option_1}</span> of Option 1
+            not chosen
           </li>
         </ul>
         <p className="panel__note">
-          “No preference” is an employee’s choice, not a menu option. “Eligible, not selected”
-          counts only employees who were entitled to a meal today.
+          Every eligible employee counts as exactly one portion. An employee who chose nothing is
+          served Option 1 and is already inside that number — the last figure says how many of them
+          there are. The healthy meal is set on the employee by an administrator, not chosen.
         </p>
       </section>
 
@@ -137,9 +138,9 @@ function ReportBody({ report }: { report: LunchReport }) {
                   <th scope="col">Canteen</th>
                   <th scope="col">Option 1</th>
                   <th scope="col">Option 2</th>
-                  <th scope="col">No preference</th>
+                  <th scope="col">Healthy meal</th>
                   <th scope="col">Total</th>
-                  <th scope="col">Eligible, not selected</th>
+                  <th scope="col">Of which not chosen</th>
                 </tr>
               </thead>
               <tbody>
@@ -148,11 +149,11 @@ function ReportBody({ report }: { report: LunchReport }) {
                     <th scope="row">{row.label}</th>
                     <td>{row.option_1}</td>
                     <td>{row.option_2}</td>
-                    <td>{row.no_preference}</td>
+                    <td>{row.healthy}</td>
                     <td>
                       <strong>{row.total}</strong>
                     </td>
-                    <td>{row.eligible_not_selected}</td>
+                    <td>{row.defaulted_to_option_1}</td>
                   </tr>
                 ))}
               </tbody>

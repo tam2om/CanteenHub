@@ -25,6 +25,8 @@ export interface Employee {
   is_active: boolean;
   /** Where this employee normally collects their meal. */
   default_location: MealLocation;
+  /** Menu options, or the healthy meal. Only an administrator changes this. */
+  meal_preference: MealPreference;
   created_at: string;
   updated_at: string;
 }
@@ -92,7 +94,64 @@ export interface MenuDayWithDetails extends MenuDay {
 // LUNCH SELECTIONS
 // ============================================================================
 
-export type LunchChoice = 'option_1' | 'option_2' | 'no_preference';
+/**
+ * What an employee eats on a given day.
+ *
+ * `no_preference` is GONE. It existed so an employee could decline to choose,
+ * but the kitchen still had to cook something, and a third pile of portions
+ * nobody had asked for is not a preference - it is an unanswered question.
+ * Not choosing now means Option 1 (see DEFAULT_LUNCH_CHOICE), which is a real
+ * plate on a real trolley.
+ *
+ * `healthy` is not something an employee picks. It is set on the person by an
+ * administrator (`employees.meal_preference`) and then applies every day; those
+ * employees do not choose between the options at all.
+ */
+export const LUNCH_CHOICES = ['option_1', 'option_2', 'healthy'] as const;
+export type LunchChoice = (typeof LUNCH_CHOICES)[number];
+
+/** The two options an ordinary employee chooses between. */
+export const SELECTABLE_LUNCH_CHOICES = ['option_1', 'option_2'] as const;
+export type SelectableLunchChoice = (typeof SELECTABLE_LUNCH_CHOICES)[number];
+
+/**
+ * What an eligible employee gets when they never choose.
+ *
+ * The kitchen counts them under this; no row is written on their behalf, so
+ * their history still shows honestly that they made no choice.
+ */
+export const DEFAULT_LUNCH_CHOICE: SelectableLunchChoice = 'option_1';
+
+export function isLunchChoice(value: unknown): value is LunchChoice {
+  return typeof value === 'string' && (LUNCH_CHOICES as readonly string[]).includes(value);
+}
+
+export function isSelectableLunchChoice(value: unknown): value is SelectableLunchChoice {
+  return (
+    typeof value === 'string' && (SELECTABLE_LUNCH_CHOICES as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * Whether this person eats from the daily menu or gets the healthy meal.
+ *
+ * A property of the PERSON, not of a day: someone on the healthy meal is on it
+ * every day until an administrator says otherwise, and cannot switch themselves.
+ */
+export const MEAL_PREFERENCES = ['standard', 'healthy'] as const;
+export type MealPreference = (typeof MEAL_PREFERENCES)[number];
+
+export const MEAL_PREFERENCE_LABELS: Record<MealPreference, string> = {
+  standard: 'Chooses from the menu',
+  healthy: 'Healthy meal',
+};
+
+export const DEFAULT_MEAL_PREFERENCE: MealPreference = 'standard';
+
+export function isMealPreference(value: unknown): value is MealPreference {
+  return typeof value === 'string' && (MEAL_PREFERENCES as readonly string[]).includes(value);
+}
+
 export type SelectionSource = 'employee' | 'admin_override' | 'system';
 
 /**
