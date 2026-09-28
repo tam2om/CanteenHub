@@ -704,6 +704,7 @@ app.get('/reports/lunch.xlsx', async (c) => {
     ['Eligible', report.totals.eligible],
     ['Not eligible', report.totals.not_eligible],
     ['Selections held by ineligible employees', report.selections.ineligible_with_selection],
+    ['Healthy meal not confirmed (not prepared)', report.selections.healthy_not_confirmed],
   ];
 
   // TWO meal columns, because they answer different questions. "Served" is what
@@ -725,7 +726,11 @@ app.get('/reports/lunch.xlsx', async (c) => {
       row.reason_label,
       row.served ? (CHOICE_LABELS[row.served] ?? row.served) : '',
       row.meal_preference === 'healthy'
-        ? 'Healthy meal (set by admin)'
+        ? row.choice
+          ? 'Healthy meal (confirmed)'
+          : row.eligible
+            ? 'Healthy meal - NOT confirmed'
+            : ''
         : row.choice
           ? (CHOICE_LABELS[row.choice] ?? row.choice)
           : row.eligible

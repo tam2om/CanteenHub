@@ -230,10 +230,37 @@ describe('Admin report - counts', () => {
     renderWithProviders(<AdminReportsPage />);
 
     expect(
-      await screen.findByText(/An employee who chose nothing is served Option 1/i)
+      await screen.findByText(/who chose nothing is served Option 1/i)
     ).toBeInTheDocument();
     expect(screen.getByText(/already inside that number/i)).toBeInTheDocument();
     expect(screen.queryByText('No preference')).not.toBeInTheDocument();
+  });
+
+  it('says how many healthy-meal employees have not confirmed, and that none is prepared', async () => {
+    stubFetch(
+      routes({
+        [REPORT]: ok(
+          reportBody({
+            selections: {
+              option_1: 3, option_2: 2, healthy: 1, defaulted_to_option_1: 0,
+              healthy_not_confirmed: 2, ineligible_with_selection: 0,
+            },
+          })
+        ),
+      })
+    );
+    renderWithProviders(<AdminReportsPage />);
+
+    expect(
+      await screen.findByText(/2 healthy-meal employees have not confirmed this date/i)
+    ).toBeInTheDocument();
+  });
+
+  it('shows no healthy-meal notice when everyone on it has confirmed', async () => {
+    stubFetch(routes());
+    renderWithProviders(<AdminReportsPage />);
+    await screen.findByRole('heading', { name: 'Portions to prepare' });
+    expect(screen.queryByText(/have not confirmed|has not confirmed/i)).not.toBeInTheDocument();
   });
 
   it('surfaces selections held by now-ineligible employees', async () => {
