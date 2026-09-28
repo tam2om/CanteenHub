@@ -18,11 +18,14 @@ import { AdminMenuPage } from './pages/admin/AdminMenuPage.js';
 import { AdminReportsPage } from './pages/admin/AdminReportsPage.js';
 import { AdminRosterPage } from './pages/admin/AdminRosterPage.js';
 
+import { SiteFooter } from './components/SiteFooter.js';
+
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="shell">
       <AppHeader />
       {children}
+      <SiteFooter />
     </div>
   );
 }

@@ -562,3 +562,24 @@ a:hover { color: var(--navy); }
   font-size: 0.8rem;
   color: var(--accent);
 }
+
+/* ---------- footer: every screen ---------- */
+
+.site-footer {
+  margin: 2.5rem auto 0;
+  padding: 1rem 1rem 0;
+  max-width: 40rem;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+.site-footer__line { margin: 0; }
+
+/* The sign-in page sits on dark navy: the default muted grey would be close to
+   unreadable there. */
+.login .site-footer {
+  color: rgba(255, 255, 255, 0.78);
+  border-top-color: rgba(255, 255, 255, 0.2);
+}
