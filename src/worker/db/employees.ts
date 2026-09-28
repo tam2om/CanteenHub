@@ -3,8 +3,8 @@
  */
 
 import type { D1Database } from '@cloudflare/workers-types';
-import type { Employee, MealLocation } from '../../shared/types/index.js';
-import { DEFAULT_MEAL_LOCATION } from '../../shared/types/index.js';
+import type { Employee, MealLocation, MealPreference } from '../../shared/types/index.js';
+import { DEFAULT_MEAL_LOCATION, DEFAULT_MEAL_PREFERENCE } from '../../shared/types/index.js';
 
 export interface EmployeeDB extends Employee {
   role_id: number;
@@ -91,20 +91,23 @@ export async function createEmployee(
     roster_type: 'regular' | 'shift' | 'amman_hq';
     role_id?: number;
     default_location?: MealLocation;
+    meal_preference?: MealPreference;
   }
 ): Promise<EmployeeDB> {
   const roleId = data.role_id ?? 1; // Default to employee role
   const location = data.default_location ?? DEFAULT_MEAL_LOCATION;
+  const mealPreference = data.meal_preference ?? DEFAULT_MEAL_PREFERENCE;
 
   const result = await db
     .prepare(`
       INSERT INTO employees
-        (amco_id, full_name, department, section, roster_type, role_id, default_location)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+        (amco_id, full_name, department, section, roster_type, role_id, default_location,
+         meal_preference)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `)
     .bind(
       data.amco_id, data.full_name, data.department ?? null, data.section ?? null,
-      data.roster_type, roleId, location
+      data.roster_type, roleId, location, mealPreference
     )
     .run();
   
@@ -125,6 +128,7 @@ export async function updateEmployee(
     is_active: boolean;
     role_id: number;
     default_location: MealLocation;
+    meal_preference: MealPreference;
   }>
 ): Promise<EmployeeDB | null> {
   const updates: string[] = [];
@@ -149,6 +153,10 @@ export async function updateEmployee(
   if (data.default_location !== undefined) {
     updates.push('default_location = ?');
     binds.push(data.default_location);
+  }
+  if (data.meal_preference !== undefined) {
+    updates.push('meal_preference = ?');
+    binds.push(data.meal_preference);
   }
   if (data.is_active !== undefined) {
     updates.push('is_active = ?');

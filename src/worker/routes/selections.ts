@@ -7,9 +7,22 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types/env.js';
 import { requireAuth, requireRole } from '../middleware/session.js';
 import { getSelectionByEmployeeAndDate, getSelectionsByDate, upsertSelection, adminOverrideSelection, getSelectionHistory } from '../repositories/selections.repo.js';
-import { isMealLocation, MEAL_LOCATIONS, type MealLocation } from '../../shared/types/index.js';
+import {
+  isMealLocation,
+  isLunchChoice,
+  isSelectableLunchChoice,
+  LUNCH_CHOICES,
+  MEAL_LOCATIONS,
+  SELECTABLE_LUNCH_CHOICES,
+  type LunchChoice,
+  type MealLocation,
+} from '../../shared/types/index.js';
 import { getEligibilityWithNextDate } from '../services/eligibility.service.js';
-import { isCutoffPassed } from '../services/settings.service.js';
+import {
+  getCurrentBusinessDate,
+  getSelectableMealDate,
+  isCutoffPassed,
+} from '../services/settings.service.js';
 import { getMenuDayByDate } from '../repositories/menu.repo.js';
 import { getEmployeeById } from '../db/employees.js';
 import { logSelectionOverride } from '../services/audit.service.js';
@@ -51,32 +64,50 @@ app.post('/me', requireAuth, async (c) => {
     return c.json({ success: false, error: 'Invalid or missing meal_date' }, 400);
   }
   
-  const validChoices = ['option_1', 'option_2', 'no_preference'];
-  if (!choice || !validChoices.includes(choice)) {
-    return c.json({ success: false, error: `choice must be one of: ${validChoices.join(', ')}` }, 400);
+  // WHERE the meal is collected is now required, not inferred. A portion has to
+  // be sent to one canteen and only the employee knows which; defaulting it
+  // quietly put food at the wrong site for anyone whose day was not typical.
+  if (!isMealLocation(pickup_location)) {
+    return c.json(
+      {
+        success: false,
+        error:
+          pickup_location === undefined || pickup_location === null
+            ? 'Choose where you will collect this meal.'
+            : `pickup_location must be one of: ${MEAL_LOCATIONS.join(', ')}`,
+      },
+      400
+    );
   }
+  const location: MealLocation = pickup_location;
 
-  // Where the meal is collected. Optional: omitting it keeps whatever the
-  // selection already had, or falls back to the employee's own default. An
-  // unrecognised value is REFUSED rather than quietly defaulted - sending a
-  // portion to the wrong canteen is worse than asking again.
-  let location: MealLocation | undefined;
-  if (pickup_location !== undefined && pickup_location !== null) {
-    if (!isMealLocation(pickup_location)) {
-      return c.json(
-        { success: false, error: `pickup_location must be one of: ${MEAL_LOCATIONS.join(', ')}` },
-        400
-      );
-    }
-    location = pickup_location;
-  }
-  
   // Get employee details
   const employee = await getEmployeeById(db, employeeId);
   if (!employee || !employee.is_active) {
     return c.json({ success: false, error: 'Employee not found or inactive' }, 403);
   }
-  
+
+  // WHAT they eat. Decided only once we know who is asking, because the answer
+  // depends on the person:
+  //
+  //   - An employee on the healthy meal does not choose between the menu
+  //     options. Their meal is recorded as `healthy` whatever the request says
+  //     - their own screen sends 'healthy', a stale tab might send option_2 -
+  //     so nobody but an administrator can move them back onto the menu.
+  //   - Everyone else chooses Option 1 or Option 2, and nothing else. In
+  //     particular they cannot put THEMSELVES on the healthy meal.
+  let effectiveChoice: LunchChoice;
+  if (employee.meal_preference === 'healthy') {
+    effectiveChoice = 'healthy';
+  } else if (isSelectableLunchChoice(choice)) {
+    effectiveChoice = choice;
+  } else {
+    return c.json(
+      { success: false, error: `choice must be one of: ${SELECTABLE_LUNCH_CHOICES.join(', ')}` },
+      400
+    );
+  }
+
   // Check eligibility server-side
   const eligibility = await getEligibilityWithNextDate(db, employee, meal_date);
   if (!eligibility.eligible) {
@@ -97,10 +128,31 @@ app.post('/me', requireAuth, async (c) => {
     return c.json({ success: false, error: 'Menu is not yet published' }, 400);
   }
   
-  // Check cutoff time
+  // Check the deadline. Lunch is ordered a day ahead, so the window for a meal
+  // closes at the cutoff on the day BEFORE it. Two different situations end up
+  // here, and they deserve different explanations:
+  //
+  //   - the meal is today or earlier: it was never orderable today at all, so
+  //     "the cutoff has passed" would read as a near miss that it is not;
+  //   - the meal is in the future, but its deadline (the cutoff yesterday-of-
+  //     it, i.e. today) has just gone by: that IS the ordinary cutoff case.
   const cutoffPassed = await isCutoffPassed(db, meal_date);
   if (cutoffPassed) {
-    return c.json({ success: false, error: 'Selection cutoff time has passed' }, 400);
+    const [today, selectable] = await Promise.all([
+      getCurrentBusinessDate(db),
+      getSelectableMealDate(db),
+    ]);
+    return c.json(
+      {
+        success: false,
+        error:
+          meal_date <= today
+            ? `Lunch is chosen a day ahead. ${meal_date} can no longer be ordered; the next date you can choose is ${selectable}.`
+            : `The selection cutoff for ${meal_date} has passed - orders close at the cutoff time the day before. The next date you can choose is ${selectable}.`,
+        selectableDate: selectable,
+      },
+      400
+    );
   }
   
   try {
@@ -108,7 +160,7 @@ app.post('/me', requireAuth, async (c) => {
       db,
       employeeId,
       meal_date,
-      choice,
+      effectiveChoice,
       'employee',
       null,
       null,
@@ -187,11 +239,12 @@ app.post('/admin/override', requireAuth, requireRole(['admin', 'super_admin']), 
     return c.json({ success: false, error: 'Invalid or missing meal_date' }, 400);
   }
   
-  const validChoices = ['option_1', 'option_2', 'no_preference'];
-  if (!choice || !validChoices.includes(choice)) {
-    return c.json({ success: false, error: `choice must be one of: ${validChoices.join(', ')}` }, 400);
+  // An administrator MAY set 'healthy' here - they are the only one who can,
+  // and an override is exactly the case where they need to.
+  if (!isLunchChoice(choice)) {
+    return c.json({ success: false, error: `choice must be one of: ${LUNCH_CHOICES.join(', ')}` }, 400);
   }
-  
+
   if (!override_reason || override_reason.trim().length === 0) {
     return c.json({ success: false, error: 'override_reason is required for admin overrides' }, 400);
   }

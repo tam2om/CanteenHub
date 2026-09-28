@@ -44,12 +44,13 @@ Precondition: a **published** menu for today and an eligible employee.
 
 | # | Step | Expected |
 |---|---|---|
-| 2.1 | Open the portal | ✅ today's menu, both options, components |
-| 2.2 | Choose Option 1 | ✅ saved and reflected |
-| 2.3 | Choose Option 2 | ✅ changed |
-| 2.4 | Choose No Preference | ✅ saved — ❌ never shown as a third menu option |
-| 2.5 | Re-tap the option already chosen | ✅ accepted, no error |
-| 2.6 | After the cutoff | ✅ selection refused with a clear reason |
+| 2.1 | Open the portal | ✅ **tomorrow's** menu (the day after, once today's cutoff has passed), "Lunch for …" and "Today is …" both shown |
+| 2.2 | Look at the choices | ✅ exactly **two** — Option 1 and Option 2; Option 1 already marked, with a note that it is what you get if you submit nothing |
+| 2.3 | Choose Option 2 without a canteen | ✅ Submit stays disabled; "Choose where you will collect this meal" shown — ❌ never pre-filled |
+| 2.4 | Choose a canteen, then Submit | ✅ "Submitted. You are down for Option 2 at … Canteen." |
+| 2.5 | Re-pick the option already saved | ✅ Submit disabled — nothing to send |
+| 2.6 | Try to order **today's** lunch (API) | ✅ refused: "Lunch is chosen a day ahead" |
+| 2.6a | As an employee an admin set to **Healthy meal** | ✅ "Healthy meal — set for you by an administrator"; no options offered; canteen still chosen and submitted |
 | 2.7 | As an Amman HQ employee | ✅ ineligible, reason shown |
 | 2.8 | As a shift employee rostered **off** | ✅ ineligible |
 | 2.9 | As a shift employee with **no roster** | ✅ "roster not published" — ❌ never shown as "off" |
@@ -109,9 +110,9 @@ Precondition: a **published** menu for today and an eligible employee.
 | # | Step | Expected |
 |---|---|---|
 | 6.1 | Report for a date with selections | ✅ counts match what was chosen |
-| 6.2 | Option 1 / Option 2 / No Preference | ✅ counted separately |
-| 6.3 | An eligible employee who did not choose | ✅ "eligible, not selected" |
-| 6.4 | An ineligible employee | ✅ **not** counted as "not selected" |
+| 6.2 | Option 1 / Option 2 / Healthy meal | ✅ counted separately, per canteen |
+| 6.3 | An eligible employee who did not choose | ✅ counted **inside** Option 1, and in "of which not chosen" |
+| 6.4 | An ineligible employee | ✅ **not** counted as a portion at all |
 | 6.5 | Reason breakdown | ✅ codes and readable reasons |
 | 6.6 | A date with no published menu | ✅ said plainly; counts are zero, not blank |
 | 6.7 | A date where nothing happened | ✅ zeros shown as `0` — ❌ not omitted |

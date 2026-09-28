@@ -28,6 +28,7 @@ import type {
   EligibilityReason,
   LunchChoice,
   MealLocation,
+  MealPreference,
   RosterEntry,
 } from '../../shared/types/index.js';
 
@@ -39,6 +40,7 @@ import type {
  */
 export type AnyEligibilityReason = EligibilityReason | EligibilityDenialReason;
 import {
+  DEFAULT_LUNCH_CHOICE,
   DEFAULT_MEAL_LOCATION,
   MEAL_LOCATIONS,
   MEAL_LOCATION_LABELS,
@@ -79,14 +81,18 @@ export interface LocationCount {
   label: string;
   option_1: number;
   option_2: number;
-  no_preference: number;
-  /** option_1 + option_2 + no_preference: portions to send to this canteen. */
+  /** Employees an administrator has put on the healthy meal. */
+  healthy: number;
+  /** option_1 + option_2 + healthy: portions to send to this canteen. */
   total: number;
   /**
-   * Eligible employees with no selection whose DEFAULT is this canteen. Not a
-   * portion - it is who would turn up here if they ordered late.
+   * How many of this canteen's option_1 portions come from employees who never
+   * chose. They ARE counted and cooked for - not choosing means Option 1 - but
+   * the kitchen can see how much of the count is a default rather than a
+   * decision, which is the difference between "120 people asked for this" and
+   * "40 asked and 80 said nothing".
    */
-  eligible_not_selected: number;
+  defaulted_to_option_1: number;
 }
 
 export interface LunchReport {
@@ -107,9 +113,14 @@ export interface LunchReport {
   selections: {
     option_1: number;
     option_2: number;
-    no_preference: number;
-    /** Eligible employees who made no selection. Never includes ineligible ones. */
-    eligible_not_selected: number;
+    /** Employees on the healthy meal, who never choose between the options. */
+    healthy: number;
+    /**
+     * Eligible employees who made no selection. They are cooked for as Option 1
+     * and are already included in `option_1` above; this is how many of that
+     * number chose nothing. Never includes ineligible employees.
+     */
+    defaulted_to_option_1: number;
     /**
      * Selections held by employees who are NOT eligible on this date - for
      * instance someone whose roster changed after they ordered. Surfaced rather
@@ -142,7 +153,38 @@ export interface LunchReport {
  * the report is counts only, and PII that is never fetched cannot leak through
  * a future change to the response shape.
  */
-type ReportEmployee = Pick<Employee, 'id' | 'roster_type' | 'is_active' | 'default_location'>;
+type ReportEmployee = Pick<
+  Employee,
+  'id' | 'roster_type' | 'is_active' | 'default_location' | 'meal_preference'
+>;
+
+/**
+ * What the kitchen serves ONE ELIGIBLE employee on a date - the single rule
+ * behind both the totals and the per-person Excel sheet, so the two can never
+ * disagree.
+ *
+ * In priority order:
+ *   1. The healthy meal, if an administrator has put them on it. That is a
+ *      property of the person, so it holds even over an old selection row
+ *      from before the change.
+ *   2. Whatever they chose.
+ *   3. Option 1 - not choosing is not a reason to go hungry.
+ *
+ * BUT ONLY WHEN LUNCH IS BEING SERVED. With no published menu there is no
+ * Option 1 to cook, and counting a default portion of it would fabricate a
+ * number the kitchen then prepares for. An explicit selection row (which only
+ * an administrator's override can create without a published menu) is still
+ * honoured; the default is not applied. `null` means nothing is served.
+ */
+export function servedMeal(
+  preference: MealPreference,
+  choice: LunchChoice | null,
+  menuPublished: boolean
+): LunchChoice | null {
+  if (choice === null && !menuPublished) return null;
+  if (preference === 'healthy') return 'healthy';
+  return choice ?? DEFAULT_LUNCH_CHOICE;
+}
 
 /**
  * Build the lunch report for one business date.
@@ -159,7 +201,9 @@ export async function buildLunchReport(
     // Every employee is "considered", inactive included: EMPLOYEE_INACTIVE is
     // itself a reported reason, so excluding them here would hide people.
     db
-      .prepare('SELECT id, roster_type, is_active, default_location FROM employees')
+      .prepare(
+        'SELECT id, roster_type, is_active, default_location, meal_preference FROM employees'
+      )
       .all<ReportEmployee>(),
     // Indexed on work_date; only this date's rows are read.
     db
@@ -183,6 +227,7 @@ export async function buildLunchReport(
   ]);
 
   const employees = employeeRows.results || [];
+  const menuPublished = menuRow?.status === 'published';
 
   const rosterByEmployee = new Map<number, RosterEntry>();
   for (const row of rosterRows.results || []) {
@@ -200,14 +245,14 @@ export async function buildLunchReport(
   const byLocation = new Map<MealLocation, Omit<LocationCount, 'location' | 'label'>>(
     MEAL_LOCATIONS.map((location) => [
       location,
-      { option_1: 0, option_2: 0, no_preference: 0, total: 0, eligible_not_selected: 0 },
+      { option_1: 0, option_2: 0, healthy: 0, total: 0, defaulted_to_option_1: 0 },
     ])
   );
 
   // ---- classify in memory, using the ONE authoritative rule engine -------
-  const counts = { option_1: 0, option_2: 0, no_preference: 0 };
+  const counts = { option_1: 0, option_2: 0, healthy: 0 };
   let eligible = 0;
-  let eligibleNotSelected = 0;
+  let defaultedToOption1 = 0;
   let ineligibleWithSelection = 0;
 
   const byReason = new Map<AnyEligibilityReason, number>();
@@ -242,21 +287,19 @@ export async function buildLunchReport(
       locationByEmployee.get(employee.id) ?? employee.default_location ?? DEFAULT_MEAL_LOCATION;
     const bucket = byLocation.get(location) ?? byLocation.get(DEFAULT_MEAL_LOCATION)!;
 
-    if (choice === 'option_1') {
-      counts.option_1 += 1;
-      bucket.option_1 += 1;
-      bucket.total += 1;
-    } else if (choice === 'option_2') {
-      counts.option_2 += 1;
-      bucket.option_2 += 1;
-      bucket.total += 1;
-    } else if (choice === 'no_preference') {
-      counts.no_preference += 1;
-      bucket.no_preference += 1;
-      bucket.total += 1;
-    } else {
-      eligibleNotSelected += 1;
-      bucket.eligible_not_selected += 1;
+    // WHAT THIS PERSON IS COOKED FOR - see `servedMeal`. When lunch is being
+    // served, every eligible employee contributes exactly one portion, which
+    // is what makes `total` a number the kitchen can load a trolley from.
+    const served = servedMeal(employee.meal_preference, choice, menuPublished);
+    if (served === null) continue;
+
+    counts[served] += 1;
+    bucket[served] += 1;
+    bucket.total += 1;
+
+    if (choice === null && employee.meal_preference !== 'healthy') {
+      defaultedToOption1 += 1;
+      bucket.defaulted_to_option_1 += 1;
     }
   }
 
@@ -287,7 +330,7 @@ export async function buildLunchReport(
     },
     selections: {
       ...counts,
-      eligible_not_selected: eligibleNotSelected,
+      defaulted_to_option_1: defaultedToOption1,
       ineligible_with_selection: ineligibleWithSelection,
     },
     eligibility: { by_reason: toReasonCounts(byReason) },
@@ -317,7 +360,15 @@ export interface LunchReportRow {
   eligible: boolean;
   reason: AnyEligibilityReason;
   reason_label: string;
+  /** What this employee actually chose. `null` means they chose nothing. */
   choice: LunchChoice | null;
+  /**
+   * What the kitchen serves them: the healthy meal if they are on it, their own
+   * choice otherwise, and Option 1 if they made none. `null` only when they are
+   * not eligible on this date and so get nothing.
+   */
+  served: LunchChoice | null;
+  meal_preference: MealPreference;
   location: MealLocation;
   location_label: string;
 }
@@ -326,10 +377,11 @@ export async function buildLunchReportDetail(
   db: D1Database,
   date: BusinessDate
 ): Promise<LunchReportRow[]> {
-  const [employeeRows, rosterRows, selectionRows, config] = await Promise.all([
+  const [employeeRows, rosterRows, selectionRows, menuRow, config] = await Promise.all([
     db
       .prepare(
-        `SELECT id, amco_id, full_name, department, section, roster_type, is_active, default_location
+        `SELECT id, amco_id, full_name, department, section, roster_type, is_active,
+                default_location, meal_preference
            FROM employees ORDER BY amco_id`
       )
       .all<
@@ -352,8 +404,14 @@ export async function buildLunchReportDetail(
       )
       .bind(date)
       .all<{ employee_id: number; choice: LunchChoice; pickup_location: MealLocation }>(),
+    db
+      .prepare('SELECT status FROM menu_days WHERE meal_date = ?')
+      .bind(date)
+      .first<{ status: string }>(),
     loadEligibilityConfig(db),
   ]);
+
+  const menuPublished = menuRow?.status === 'published';
 
   const rosterByEmployee = new Map<number, RosterEntry>();
   for (const row of rosterRows.results || []) {
@@ -380,6 +438,12 @@ export async function buildLunchReportDetail(
     const selection = selectionByEmployee.get(employee.id) ?? null;
     const location = selection?.location ?? employee.default_location ?? DEFAULT_MEAL_LOCATION;
 
+    // The same rule the totals use, so a sheet and the number above it can
+    // never disagree.
+    const served = verdict.eligible
+      ? servedMeal(employee.meal_preference, selection?.choice ?? null, menuPublished)
+      : null;
+
     return {
       amco_id: employee.amco_id,
       full_name: employee.full_name,
@@ -390,6 +454,8 @@ export async function buildLunchReportDetail(
       reason: verdict.reason,
       reason_label: REASON_LABELS[verdict.reason],
       choice: selection?.choice ?? null,
+      served,
+      meal_preference: employee.meal_preference,
       location,
       location_label: MEAL_LOCATION_LABELS[location],
     };

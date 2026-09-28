@@ -70,10 +70,19 @@ describe('Meal collection points', () => {
         .first<{ pickup_location: string }>()
     )?.pickup_location;
 
-  it('a selection with no location takes the employee default', async () => {
+  /**
+   * Where the meal is collected is REQUIRED on every submission.
+   *
+   * It used to be optional and fall back to the employee's usual canteen. That
+   * is exactly the case it got wrong: someone working at another site for the
+   * day had a portion sent to where they normally eat, and nobody was asked.
+   */
+  it('a selection with no location is REFUSED, not defaulted', async () => {
     const res = await select(employee.cookie, { meal_date: DATE, choice: 'option_1' });
-    expect(res.status).toBe(201);
-    expect(await storedLocation(employee.id)).toBe('omco_canteen');
+
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(await readJson(res))).toMatch(/where you will collect/i);
+    expect(await countRows(db, 'SELECT COUNT(*) as n FROM lunch_selections')).toBe(0);
   });
 
   it('an employee can choose a different canteen for the day', async () => {
@@ -110,18 +119,31 @@ describe('Meal collection points', () => {
     expect(await countRows(db, 'SELECT COUNT(*) as n FROM lunch_selections')).toBe(0);
   });
 
-  it('omitting the location on a later change leaves it alone', async () => {
+  it('a later change must say where again, and is refused without it', async () => {
     await select(employee.cookie, {
       meal_date: DATE,
       choice: 'option_1',
       pickup_location: 'whc_canteen',
     });
-    await select(employee.cookie, { meal_date: DATE, choice: 'option_2' });
+
+    const res = await select(employee.cookie, { meal_date: DATE, choice: 'option_2' });
+
+    expect(res.status).toBe(400);
+    // Refused outright: the stored selection is untouched, not half-changed.
     expect(await storedLocation(employee.id)).toBe('whc_canteen');
+    const stored = await db
+      .prepare('SELECT choice FROM lunch_selections WHERE employee_id = ?')
+      .bind(employee.id)
+      .first<{ choice: string }>();
+    expect(stored!.choice).toBe('option_1');
   });
 
   it('changing ONLY the canteen is a real change, and is recorded', async () => {
-    await select(employee.cookie, { meal_date: DATE, choice: 'option_1' });
+    await select(employee.cookie, {
+      meal_date: DATE,
+      choice: 'option_1',
+      pickup_location: 'omco_canteen',
+    });
     const res = await select(employee.cookie, {
       meal_date: DATE,
       choice: 'option_1',
@@ -145,7 +167,11 @@ describe('Meal collection points', () => {
   });
 
   it('re-submitting the identical choice AND canteen writes nothing', async () => {
-    await select(employee.cookie, { meal_date: DATE, choice: 'option_1' });
+    await select(employee.cookie, {
+      meal_date: DATE,
+      choice: 'option_1',
+      pickup_location: 'omco_canteen',
+    });
     const before = await countRows(db, 'SELECT COUNT(*) as n FROM lunch_selection_history');
 
     const res = await select(employee.cookie, {
@@ -161,13 +187,13 @@ describe('Meal collection points', () => {
   // The report
   // ==========================================================================
 
-  it('the report counts portions per canteen', async () => {
+  it('the report counts portions at the canteen the EMPLOYEE chose', async () => {
     const a = await seedEmployee(db, { amcoId: 'TEST610', defaultLocation: 'omco_canteen' });
     const b = await seedEmployee(db, { amcoId: 'TEST611', defaultLocation: 'omco_canteen' });
     const c = await seedEmployee(db, { amcoId: 'TEST612', defaultLocation: 'whc_canteen' });
-    await select(a.cookie, { meal_date: DATE, choice: 'option_1' });
-    await select(b.cookie, { meal_date: DATE, choice: 'option_1' });
-    await select(c.cookie, { meal_date: DATE, choice: 'option_2' });
+    await select(a.cookie, { meal_date: DATE, choice: 'option_1', pickup_location: 'omco_canteen' });
+    await select(b.cookie, { meal_date: DATE, choice: 'option_1', pickup_location: 'omco_canteen' });
+    await select(c.cookie, { meal_date: DATE, choice: 'option_2', pickup_location: 'whc_canteen' });
 
     const body = await readJson(
       await app.request(`${BASE}/api/admin/reports/lunch?date=${DATE}`, { headers: { Cookie: admin.cookie } }, env)
@@ -176,8 +202,11 @@ describe('Meal collection points', () => {
 
     const omco = byLocation.find((l) => l.location === 'omco_canteen')!;
     const whc = byLocation.find((l) => l.location === 'whc_canteen')!;
-    expect(omco.option_1).toBe(2);
-    expect(omco.total).toBe(2);
+    // `employee` (TEST601) is eligible and chose nothing: one defaulted Option 1
+    // portion at their usual canteen, OMCO.
+    expect(omco.option_1).toBe(3);
+    expect(omco.defaulted_to_option_1).toBe(1);
+    expect(omco.total).toBe(3);
     expect(whc.option_2).toBe(1);
     expect(whc.total).toBe(1);
   });
@@ -186,13 +215,25 @@ describe('Meal collection points', () => {
     const body = await readJson(
       await app.request(`${BASE}/api/admin/reports/lunch?date=${DATE}`, { headers: { Cookie: admin.cookie } }, env)
     );
-    const byLocation = body.data.by_location as Array<{ location: string; total: number }>;
+    const byLocation = body.data.by_location as Array<{
+      location: string;
+      total: number;
+      defaulted_to_option_1: number;
+    }>;
     expect(byLocation.map((l) => l.location)).toEqual([
       'amco_canteen',
       'omco_canteen',
       'whc_canteen',
     ]);
-    expect(byLocation.every((l) => l.total === 0)).toBe(true);
+
+    // Nobody has chosen anything, but the two seeded employees are eligible on
+    // this Sunday and are cooked for as Option 1 at their own canteens - AMCO
+    // for the admin, OMCO for the employee. WHC has nobody at all.
+    const whc = byLocation.find((l) => l.location === 'whc_canteen')!;
+    expect(whc.total).toBe(0);
+    expect(byLocation.reduce((sum, l) => sum + l.defaulted_to_option_1, 0)).toBe(
+      byLocation.reduce((sum, l) => sum + l.total, 0)
+    );
   });
 
   // ==========================================================================
@@ -233,36 +274,71 @@ describe('Meal collection points', () => {
 
     it('the Totals sheet carries the per-canteen quantities', async () => {
       const a = await seedEmployee(db, { amcoId: 'TEST620', defaultLocation: 'omco_canteen' });
-      await select(a.cookie, { meal_date: DATE, choice: 'option_1' });
+      await select(a.cookie, { meal_date: DATE, choice: 'option_1', pickup_location: 'omco_canteen' });
 
       const buffer = await (await download(admin.cookie)).arrayBuffer();
       const sheet = await readWorksheet(buffer, 'Totals');
       const rows = sheet.rows.map((r) => [...r.cells.values()]);
 
       expect(rows[0]).toEqual([
-        'Canteen', 'Option 1', 'Option 2', 'No preference', 'Total portions',
-        'Eligible, not selected',
+        'Canteen', 'Option 1', 'Option 2', 'Healthy meal', 'Total portions',
+        'Of which not chosen',
       ]);
       const omcoRow = rows.find((r) => r[0] === 'OMCO Canteen')!;
-      expect(omcoRow[1]).toBe('1'); // one Option 1 at OMCO
+      // TEST620 chose Option 1; TEST601 chose nothing and is counted as one too.
+      expect(omcoRow[1]).toBe('2');
+      expect(omcoRow[5]).toBe('1'); // exactly one of them was a default
       expect(rows.some((r) => r[0] === 'AMCO Canteen')).toBe(true);
       expect(rows.some((r) => r[0] === 'WHC Canteen')).toBe(true);
     });
 
-    it('the Detail sheet lists the employees behind the totals', async () => {
-      await select(employee.cookie, { meal_date: DATE, choice: 'option_2' });
+    it('the Totals sheet counts employees on the healthy meal in their own column', async () => {
+      await seedEmployee(db, {
+        amcoId: 'TEST630',
+        defaultLocation: 'whc_canteen',
+        mealPreference: 'healthy',
+      });
+
+      const buffer = await (await download(admin.cookie)).arrayBuffer();
+      const sheet = await readWorksheet(buffer, 'Totals');
+      const rows = sheet.rows.map((r) => [...r.cells.values()]);
+
+      const whcRow = rows.find((r) => r[0] === 'WHC Canteen')!;
+      expect(whcRow[3]).toBe('1'); // Healthy meal
+      expect(whcRow[4]).toBe('1'); // and it IS a portion to send
+    });
+
+    it('the Detail sheet says what is served AND whether it was chosen', async () => {
+      await select(employee.cookie, {
+        meal_date: DATE,
+        choice: 'option_2',
+        pickup_location: 'omco_canteen',
+      });
+      await seedEmployee(db, { amcoId: 'TEST640' }); // chooses nothing
+      await seedEmployee(db, { amcoId: 'TEST650', mealPreference: 'healthy' });
 
       const buffer = await (await download(admin.cookie)).arrayBuffer();
       const sheet = await readWorksheet(buffer, 'Detail');
       const rows = sheet.rows.map((r) => [...r.cells.values()]);
 
       expect(rows[0]).toEqual([
-        'ID', 'Name', 'Department', 'Section', 'Roster', 'Eligible', 'Reason', 'Choice',
-        'Canteen',
+        'ID', 'Name', 'Department', 'Section', 'Roster', 'Eligible', 'Reason',
+        'Served', 'Chose', 'Canteen',
       ]);
-      const row = rows.find((r) => r[0] === 'TEST601')!;
-      expect(row).toContain('Option 2');
-      expect(row).toContain('OMCO Canteen');
+
+      const chooser = rows.find((r) => r[0] === 'TEST601')!;
+      expect(chooser[7]).toBe('Option 2');
+      expect(chooser[8]).toBe('Option 2');
+      expect(chooser[9]).toBe('OMCO Canteen');
+
+      // Served a portion, but the kitchen can see nobody asked for it.
+      const silent = rows.find((r) => r[0] === 'TEST640')!;
+      expect(silent[7]).toBe('Option 1');
+      expect(silent[8]).toBe('Not chosen');
+
+      const healthy = rows.find((r) => r[0] === 'TEST650')!;
+      expect(healthy[7]).toBe('Healthy meal');
+      expect(healthy[8]).toContain('set by admin');
     });
 
     it('exports a date with no menu without failing', async () => {

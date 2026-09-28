@@ -69,7 +69,15 @@ describe('Employee portal API (/api/me)', () => {
     app.request(`${BASE}/api/me/selections/history${query}`, { headers: { Cookie: cookie } }, env);
 
   const select = (cookie: string, choice: string, mealDate = MEAL_DATE) =>
-    app.request(`${BASE}/api/selections/me`, jsonRequest({ meal_date: mealDate, choice }, cookie), env);
+    app.request(
+      `${BASE}/api/selections/me`,
+      jsonRequest(
+        // A canteen is required on every submission now.
+        { meal_date: mealDate, choice, pickup_location: 'amco_canteen' },
+        cookie
+      ),
+      env
+    );
 
   // ==========================================================================
   // AUTH
@@ -100,7 +108,39 @@ describe('Employee portal API (/api/me)', () => {
       expect(res.status).toBe(200);
       const body = await readJson(res);
       expect(body.data.businessDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-      expect(body.data.mealDate).toBe(body.data.businessDate);
+      // Lunch is ordered a day ahead: the meal date is the next date that can
+      // still be chosen, never today.
+      expect(body.data.mealDate).toBe(body.data.selectableDate);
+      expect(body.data.mealDate > body.data.businessDate).toBe(true);
+    });
+
+    it('offers tomorrow before the cutoff, and the day after once it has passed', async () => {
+      await setSetting(db, 'lunch_cutoff_time', '"10:00"', 'time');
+
+      // 06:00 UTC is 09:00 in Amman - before the cutoff.
+      vi.setSystemTime(new Date('2027-03-15T06:00:00Z'));
+      let body = await readJson(await today(employee.cookie));
+      expect(body.data.businessDate).toBe('2027-03-15');
+      expect(body.data.selectableDate).toBe('2027-03-16');
+
+      // 09:00 UTC is 12:00 in Amman - the cutoff has gone, so tomorrow is
+      // settled and the next thing anyone can order is the day after.
+      vi.setSystemTime(new Date('2027-03-15T09:00:00Z'));
+      body = await readJson(await today(employee.cookie));
+      expect(body.data.businessDate).toBe('2027-03-15');
+      expect(body.data.selectableDate).toBe('2027-03-17');
+    });
+
+    it('says whether the employee’s meal is locked to the healthy meal', async () => {
+      const healthy = await seedEmployee(db, {
+        amcoId: 'TEST030',
+        rosterType: 'regular',
+        mealPreference: 'healthy',
+      });
+      await extendAllSessions(db);
+
+      expect((await readJson(await today(employee.cookie))).data.choiceLocked).toBe(false);
+      expect((await readJson(await today(healthy.cookie))).data.choiceLocked).toBe(true);
     });
 
     it('the business date is the Asia/Amman day, not the UTC day', async () => {
@@ -285,10 +325,14 @@ describe('Employee portal API (/api/me)', () => {
       expect(body.data.selection).toBeNull();
     });
 
+    /**
+     * The deadline for a meal is the cutoff on the day BEFORE it, because the
+     * kitchen buys and preps a day ahead. 2027-03-06 is the day before
+     * MEAL_DATE, and 09:00 UTC is 12:00 in Amman.
+     */
     it('19. the cutoff outcome is computed server-side and surfaced', async () => {
       await setSetting(db, 'lunch_cutoff_time', '"11:00"', 'time');
-      // 09:00 UTC is 12:00 in Amman, past an 11:00 cutoff.
-      vi.setSystemTime(new Date(`${MEAL_DATE}T09:00:00Z`));
+      vi.setSystemTime(new Date('2027-03-06T09:00:00Z'));
 
       const body = await readJson(await today(employee.cookie, MEAL_DATE));
       expect(body.data.cutoffPassed).toBe(true);
@@ -296,13 +340,24 @@ describe('Employee portal API (/api/me)', () => {
     });
 
     it('19. the cutoff flag follows the configured setting, not a constant', async () => {
-      vi.setSystemTime(new Date(`${MEAL_DATE}T09:00:00Z`)); // 12:00 Amman
+      vi.setSystemTime(new Date('2027-03-06T09:00:00Z')); // 12:00 Amman, day before
 
       await setSetting(db, 'lunch_cutoff_time', '"11:00"', 'time');
       expect((await readJson(await today(employee.cookie, MEAL_DATE))).data.cutoffPassed).toBe(true);
 
       await setSetting(db, 'lunch_cutoff_time', '"16:00"', 'time');
       expect((await readJson(await today(employee.cookie, MEAL_DATE))).data.cutoffPassed).toBe(false);
+    });
+
+    it('today’s own lunch is always past its deadline', async () => {
+      await setSetting(db, 'lunch_cutoff_time', '"23:59"', 'time');
+      // Early morning ON the meal date, with a cutoff that has not passed
+      // today. The window still closed yesterday.
+      vi.setSystemTime(new Date(`${MEAL_DATE}T04:00:00Z`));
+
+      const body = await readJson(await today(employee.cookie, MEAL_DATE));
+      expect(body.data.cutoffPassed).toBe(true);
+      expect(body.data.canSelect).toBe(false);
     });
   });
 

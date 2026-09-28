@@ -173,7 +173,20 @@ describe('Admin lunch report', () => {
       expect(body.menu).toEqual({ exists: false, published: false, status: null });
       // Eligibility is still real; only the menu is absent.
       expect(body.totals.employees_considered).toBe(3);
+      // `employee` is eligible and chose nothing - but with no menu there is
+      // no Option 1 to cook, so the default must NOT be applied.
       expect(body.selections.option_1).toBe(0);
+      expect(body.selections.defaulted_to_option_1).toBe(0);
+    });
+
+    it('a DRAFT menu does not trigger default portions either', async () => {
+      await seedMenuDay(db, MONDAY, 'draft');
+      await seedEmployee(db, { amcoId: 'TEST110', mealPreference: 'healthy' });
+
+      const { body } = await report();
+      expect(body.selections.option_1).toBe(0);
+      expect(body.selections.healthy).toBe(0);
+      expect(body.by_location.every((l: { total: number }) => l.total === 0)).toBe(true);
     });
   });
 
@@ -186,43 +199,60 @@ describe('Admin lunch report', () => {
       await publishMenu(MONDAY);
     });
 
-    it('counts option 1, option 2 and no preference separately', async () => {
+    it('counts option 1 and option 2 separately', async () => {
       const a = await seedEmployee(db, { amcoId: 'TEST101', rosterType: 'regular' });
       const b = await seedEmployee(db, { amcoId: 'TEST102', rosterType: 'regular' });
-      const c = await seedEmployee(db, { amcoId: 'TEST103', rosterType: 'regular' });
 
       await select(a.id, MONDAY, 'option_1');
       await select(b.id, MONDAY, 'option_2');
-      await select(c.id, MONDAY, 'no_preference');
 
       const { body } = await report();
+      // `employee` is also eligible on this Monday and chose nothing, so the
+      // kitchen cooks them an Option 1 too - and says it was a default.
       expect(body.selections).toMatchObject({
-        option_1: 1,
+        option_1: 2,
         option_2: 1,
-        no_preference: 1,
+        healthy: 0,
+        defaulted_to_option_1: 1,
       });
     });
 
-    it('counts an eligible employee with NO selection separately', async () => {
+    it('counts an eligible employee who chose NOTHING as an Option 1 portion', async () => {
       await seedEmployee(db, { amcoId: 'TEST101', rosterType: 'regular' });
       await select(employee.id, MONDAY, 'option_1');
 
       const { body } = await report();
-      // employee selected; TEST101 did not; the two admins are Amman HQ.
-      expect(body.selections.option_1).toBe(1);
-      expect(body.selections.eligible_not_selected).toBe(1);
+      // employee chose option 1; TEST101 chose nothing and is cooked for as
+      // option 1 too - the kitchen feeds everyone entitled to a meal.
+      expect(body.selections.option_1).toBe(2);
+      expect(body.selections.defaulted_to_option_1).toBe(1);
       expect(body.totals.eligible).toBe(2);
     });
 
-    it('does NOT count ineligible employees as eligible-but-not-selected', async () => {
+    it('counts an employee on the HEALTHY meal as healthy, choice or no choice', async () => {
+      const healthy = await seedEmployee(db, {
+        amcoId: 'TEST105',
+        rosterType: 'regular',
+        mealPreference: 'healthy',
+      });
+      // An old row from before they were moved onto the healthy meal.
+      await select(healthy.id, MONDAY, 'option_2');
+
+      const { body } = await report();
+      expect(body.selections.healthy).toBe(1);
+      expect(body.selections.option_2).toBe(0);
+    });
+
+    it('does NOT count ineligible employees at all', async () => {
       await seedEmployee(db, { amcoId: 'TEST200', rosterType: 'amman_hq' });
       await seedEmployee(db, { amcoId: 'TEST201', rosterType: 'shift' }); // no roster
       await seedEmployee(db, { amcoId: 'TEST202', isActive: false });
 
       const { body } = await report();
-      // Only `employee` (regular, Monday) is eligible and unselected.
+      // Only `employee` (regular, Monday) is eligible, and chose nothing.
       expect(body.totals.eligible).toBe(1);
-      expect(body.selections.eligible_not_selected).toBe(1);
+      expect(body.selections.option_1).toBe(1);
+      expect(body.selections.defaulted_to_option_1).toBe(1);
       expect(body.totals.not_eligible).toBe(5);
     });
 
@@ -232,23 +262,31 @@ describe('Admin lunch report', () => {
       await roster(shiftWorker.id, MONDAY, 'off'); // roster changed after ordering
 
       const { body } = await report();
-      expect(body.selections.option_1).toBe(0);
+      // `employee` is the only eligible person: one defaulted option 1 portion.
+      expect(body.selections.option_1).toBe(1);
+      expect(body.selections.defaulted_to_option_1).toBe(1);
       expect(body.selections.ineligible_with_selection).toBe(1);
-      expect(body.selections.eligible_not_selected).toBe(1); // `employee` only
       expect(reasonCount(body, 'SHIFT_OFF')).toBe(1);
     });
 
-    it('totals add up: eligible = selections + not selected', async () => {
+    it('totals add up: every eligible employee is exactly one portion', async () => {
       for (const id of ['TEST101', 'TEST102', 'TEST103', 'TEST104']) {
         await seedEmployee(db, { amcoId: id, rosterType: 'regular' });
       }
+      await seedEmployee(db, {
+        amcoId: 'TEST105',
+        rosterType: 'regular',
+        mealPreference: 'healthy',
+      });
       const rows = await db.prepare("SELECT id FROM employees WHERE amco_id IN ('TEST101','TEST102')").all<{ id: number }>();
       await select(rows.results![0].id, MONDAY, 'option_1');
-      await select(rows.results![1].id, MONDAY, 'no_preference');
+      await select(rows.results![1].id, MONDAY, 'option_2');
 
       const { body } = await report();
       const s = body.selections;
-      expect(s.option_1 + s.option_2 + s.no_preference + s.eligible_not_selected).toBe(body.totals.eligible);
+      expect(s.option_1 + s.option_2 + s.healthy).toBe(body.totals.eligible);
+      // The defaulted ones are INSIDE option_1, not alongside it.
+      expect(s.defaulted_to_option_1).toBeLessThanOrEqual(s.option_1);
       expect(body.totals.eligible + body.totals.not_eligible).toBe(body.totals.employees_considered);
     });
   });

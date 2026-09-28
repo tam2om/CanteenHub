@@ -45,9 +45,8 @@
  * and fourth thing an employee may choose. In the real file "Option Meal 1" is
  * always a salad and "Option Meal 2" is almost always yoghurt - accompaniments
  * served with whichever main was picked. They map to COMPONENTS, not options.
- * The employee's choice is Option 1 vs Option 2 vs No Preference, and nothing
- * else. The header text actively argues for the wrong reading, which is why
- * this comment exists.
+ * The employee's choice is Option 1 vs Option 2, and nothing else. The header
+ * text actively argues for the wrong reading, which is why this comment exists.
  */
 
 import type { D1Database } from '@cloudflare/workers-types';

@@ -288,29 +288,35 @@ export async function getSelectionHistoryForEmployee(
 }
 
 /**
- * Get all selections count by choice for a date (for reports)
+ * Count the selections RECORDED for a date, by choice.
+ *
+ * Deliberately NOT the portion counts. This counts rows that exist; it knows
+ * nothing about employees who are entitled to a meal and chose nothing, and
+ * nothing about who is on the healthy meal by standing instruction rather than
+ * by a row. `services/reports.service.ts` is the one place that answers "how
+ * many portions", and it reads eligibility to do it.
  */
 export async function getSelectionCountsByDate(
   db: D1Database,
   mealDate: string
-): Promise<{ option_1: number; option_2: number; no_preference: number; total: number }> {
+): Promise<{ option_1: number; option_2: number; healthy: number; total: number }> {
   const result = await db
     .prepare(`
-      SELECT 
+      SELECT
         SUM(CASE WHEN choice = 'option_1' THEN 1 ELSE 0 END) as option_1,
         SUM(CASE WHEN choice = 'option_2' THEN 1 ELSE 0 END) as option_2,
-        SUM(CASE WHEN choice = 'no_preference' THEN 1 ELSE 0 END) as no_preference,
+        SUM(CASE WHEN choice = 'healthy' THEN 1 ELSE 0 END) as healthy,
         COUNT(*) as total
       FROM lunch_selections
       WHERE meal_date = ?
     `)
     .bind(mealDate)
-    .first<{ option_1: number; option_2: number; no_preference: number; total: number }>();
-  
+    .first<{ option_1: number; option_2: number; healthy: number; total: number }>();
+
   return {
     option_1: result?.option_1 || 0,
     option_2: result?.option_2 || 0,
-    no_preference: result?.no_preference || 0,
+    healthy: result?.healthy || 0,
     total: result?.total || 0
   };
 }

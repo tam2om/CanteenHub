@@ -121,7 +121,9 @@ export const SESSION_USER = {
 /** A complete, eligible /api/me/today payload; override per test. */
 export function todayPayload(overrides: Partial<TodayPayload> = {}): TodayPayload {
   return {
-    businessDate: '2027-03-07',
+    // Lunch is chosen a day ahead, so the meal date is always after today.
+    businessDate: '2027-03-06',
+    selectableDate: '2027-03-07',
     mealDate: '2027-03-07',
     employee: {
       id: 1,
@@ -131,6 +133,8 @@ export function todayPayload(overrides: Partial<TodayPayload> = {}): TodayPayloa
       section: 'Operations',
       roster_type: 'regular',
       is_active: 1,
+      default_location: 'amco_canteen',
+      meal_preference: 'standard',
     },
     eligibility: {
       eligible: true,
@@ -150,6 +154,7 @@ export function todayPayload(overrides: Partial<TodayPayload> = {}): TodayPayloa
     },
     selection: null,
     cutoffPassed: false,
+    choiceLocked: false,
     canSelect: true,
     ...overrides,
   };

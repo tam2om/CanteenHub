@@ -21,14 +21,19 @@ export function useToday(date?: string) {
   });
 }
 
+/**
+ * Submit a meal choice.
+ *
+ * `pickupLocation` is REQUIRED. The server refuses a selection without one -
+ * a portion has to be sent to a particular canteen - so the mutation will not
+ * let a caller omit it and discover that at runtime.
+ */
 export function useSelectMeal(mealDate: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (input: LunchChoice | { choice: LunchChoice; pickupLocation?: MealLocation }) =>
-      typeof input === 'string'
-        ? submitSelection(mealDate, input)
-        : submitSelection(mealDate, input.choice, input.pickupLocation),
+    mutationFn: (input: { choice: LunchChoice; pickupLocation: MealLocation }) =>
+      submitSelection(mealDate, input.choice, input.pickupLocation),
     // Refetch rather than patching the cache by hand: the server owns the
     // resulting state, including whether the write was a no-op.
     onSuccess: () => {

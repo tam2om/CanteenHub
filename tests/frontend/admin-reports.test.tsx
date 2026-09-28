@@ -34,8 +34,8 @@ function reportBody(overrides: Record<string, unknown> = {}) {
     selections: {
       option_1: 3,
       option_2: 2,
-      no_preference: 1,
-      eligible_not_selected: 0,
+      healthy: 1,
+      defaulted_to_option_1: 0,
       ineligible_with_selection: 0,
     },
     eligibility: {
@@ -156,8 +156,8 @@ describe('Admin report - menu state', () => {
           reportBody({
             menu: { exists: false, published: false, status: null },
             selections: {
-              option_1: 0, option_2: 0, no_preference: 0,
-              eligible_not_selected: 6, ineligible_with_selection: 0,
+              option_1: 6, option_2: 0, healthy: 0,
+              defaulted_to_option_1: 6, ineligible_with_selection: 0,
             },
           })
         ),
@@ -210,8 +210,8 @@ describe('Admin report - counts', () => {
     expect(items).toEqual([
       '3 Option 1',
       '2 Option 2',
-      '1 No preference',
-      '0 Eligible, not selected',
+      '1 Healthy meal',
+      '0 of Option 1 not chosen',
     ]);
   });
 
@@ -225,14 +225,15 @@ describe('Admin report - counts', () => {
     expect(items).toEqual(['10 employees considered', '6 eligible', '4 not eligible']);
   });
 
-  it('explains that No Preference is a choice, not a third menu option', async () => {
+  it('explains that a non-chooser is still a portion, counted inside Option 1', async () => {
     stubFetch(routes());
     renderWithProviders(<AdminReportsPage />);
 
     expect(
-      await screen.findByText(/an employee’s choice, not a menu option/i)
+      await screen.findByText(/An employee who chose nothing is served Option 1/i)
     ).toBeInTheDocument();
-    expect(screen.queryByText('Option 3')).not.toBeInTheDocument();
+    expect(screen.getByText(/already inside that number/i)).toBeInTheDocument();
+    expect(screen.queryByText('No preference')).not.toBeInTheDocument();
   });
 
   it('surfaces selections held by now-ineligible employees', async () => {
@@ -241,8 +242,8 @@ describe('Admin report - counts', () => {
         [REPORT]: ok(
           reportBody({
             selections: {
-              option_1: 3, option_2: 2, no_preference: 1,
-              eligible_not_selected: 0, ineligible_with_selection: 2,
+              option_1: 3, option_2: 2, healthy: 1,
+              defaulted_to_option_1: 0, ineligible_with_selection: 2,
             },
           })
         ),

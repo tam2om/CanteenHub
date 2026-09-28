@@ -136,7 +136,7 @@ describe('Admin holidays', () => {
 
       const res = await app.request(
         `${BASE}/api/selections/me`,
-        jsonRequest({ meal_date: HOLIDAY_DATE, choice: 'option_1' }, employee.cookie),
+        jsonRequest({ meal_date: HOLIDAY_DATE, choice: 'option_1', pickup_location: 'amco_canteen' }, employee.cookie),
         env
       );
 
@@ -211,7 +211,7 @@ describe('Admin holidays', () => {
 
       const res = await app.request(
         `${BASE}/api/selections/me`,
-        jsonRequest({ meal_date: HOLIDAY_DATE, choice: 'option_1' }, employee.cookie),
+        jsonRequest({ meal_date: HOLIDAY_DATE, choice: 'option_1', pickup_location: 'amco_canteen' }, employee.cookie),
         env
       );
       expect(res.status).toBe(201);

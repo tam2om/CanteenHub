@@ -20,7 +20,11 @@ import type { Env, Variables } from '../types/env.js';
 import { requireAuth } from '../middleware/session.js';
 import { getEmployeeById } from '../db/employees.js';
 import { toPublicEmployee } from '../lib/employeeView.js';
-import { getCurrentBusinessDate, isCutoffPassed } from '../services/settings.service.js';
+import {
+  getCurrentBusinessDate,
+  getSelectableMealDate,
+  isCutoffPassed,
+} from '../services/settings.service.js';
 import { getEligibilityWithNextDate } from '../services/eligibility.service.js';
 import { getPublishedMenuByDate } from '../repositories/menu.repo.js';
 import {
@@ -45,20 +49,25 @@ const DEFAULT_HISTORY_LIMIT = 30;
  * eligibility, cutoff) is computed server-side so the browser never derives any
  * of it from its own clock or timezone.
  *
- * `?date=YYYY-MM-DD` is accepted for viewing another day; it defaults to the
- * configured business date.
+ * THE DEFAULT DAY IS NOT TODAY. Lunch is ordered a day ahead, so the dashboard
+ * opens on the next date that can still be ordered - tomorrow before the
+ * cutoff, the day after once it has passed. `businessDate` is still returned
+ * alongside it, because the screen has to be able to say what today is.
+ *
+ * `?date=YYYY-MM-DD` is accepted for viewing another day.
  */
 app.get('/today', async (c) => {
   const db = c.env.DB;
   const employeeId = c.get('session')!.employee_id;
 
   const businessDate = await getCurrentBusinessDate(db);
+  const selectableDate = await getSelectableMealDate(db);
 
   const requestedDate = c.req.query('date');
   if (requestedDate !== undefined && !isValidBusinessDate(requestedDate)) {
     return c.json({ success: false, error: 'Invalid date. Use YYYY-MM-DD' }, 400);
   }
-  const mealDate = requestedDate ?? businessDate;
+  const mealDate = requestedDate ?? selectableDate;
 
   const employee = await getEmployeeById(db, employeeId);
   if (!employee) {
@@ -82,12 +91,21 @@ app.get('/today', async (c) => {
     success: true,
     data: {
       businessDate,
+      /** The next date that can still be ordered, whatever `date` was asked for. */
+      selectableDate,
       mealDate,
       employee: toPublicEmployee(employee),
       eligibility,
       menu,
       selection,
       cutoffPassed,
+      /**
+       * This employee is on the healthy meal: the option is decided for them
+       * and only an administrator can change it. They still choose where to
+       * collect it, so the screen stays usable - it just does not offer the
+       * menu options.
+       */
+      choiceLocked: employee.meal_preference === 'healthy',
       // A single flag the UI can render from, rather than re-deriving the rule.
       canSelect: eligibility.eligible && !cutoffPassed && menu !== null,
     },

@@ -50,8 +50,25 @@ describe('Selection API', () => {
     await seedMenuDay(db, MEAL_DATE, 'published');
   });
 
-  const select = (employee: SeededEmployee, choice: string, mealDate = MEAL_DATE) =>
-    app.request(`${BASE}/api/selections/me`, jsonRequest({ meal_date: mealDate, choice }, employee.cookie), env);
+  /**
+   * Submit a selection. A pickup location is ALWAYS sent, because the server
+   * now requires one - the tests that prove that requirement build their own
+   * request rather than going through this helper.
+   */
+  const select = (
+    employee: SeededEmployee,
+    choice: string,
+    mealDate = MEAL_DATE,
+    pickupLocation: string = 'amco_canteen'
+  ) =>
+    app.request(
+      `${BASE}/api/selections/me`,
+      jsonRequest(
+        { meal_date: mealDate, choice, pickup_location: pickupLocation },
+        employee.cookie
+      ),
+      env
+    );
 
   describe('an eligible employee can select', () => {
     it('option_1', async () => {
@@ -68,10 +85,19 @@ describe('Selection API', () => {
       expect((await readJson(res)).data.choice).toBe('option_2');
     });
 
-    it('no_preference', async () => {
+    it('REFUSES no_preference, which is no longer a choice at all', async () => {
       const res = await select(regular, 'no_preference');
-      expect(res.status).toBe(201);
-      expect((await readJson(res)).data.choice).toBe('no_preference');
+      expect(res.status).toBe(400);
+      expect((await readJson(res)).error).toContain('choice must be one of');
+      expect(
+        await countRows(db, 'SELECT COUNT(*) as n FROM lunch_selections WHERE employee_id = ?', regular.id)
+      ).toBe(0);
+    });
+
+    it('REFUSES healthy from the employee: only an administrator assigns it', async () => {
+      const res = await select(regular, 'healthy');
+      expect(res.status).toBe(400);
+      expect((await readJson(res)).error).toContain('choice must be one of');
     });
 
     it('a rostered Day shift employee can select', async () => {
@@ -188,7 +214,7 @@ describe('Selection API', () => {
 
     it('repeated ten times still yields exactly one history row', async () => {
       for (let i = 0; i < 10; i++) {
-        await select(regular, 'no_preference');
+        await select(regular, 'option_2');
       }
       expect(
         await countRows(db, 'SELECT COUNT(*) as n FROM lunch_selection_history WHERE employee_id = ?', regular.id)
@@ -237,6 +263,169 @@ describe('Selection API', () => {
 
       const body = await readJson(res);
       expect(body.nextEligibleDate).toBe(MEAL_DATE); // Sunday 2027-03-07
+    });
+  });
+
+  describe('where the meal is collected is REQUIRED', () => {
+    const selectWithoutLocation = (employee: SeededEmployee, choice = 'option_1') =>
+      app.request(
+        `${BASE}/api/selections/me`,
+        jsonRequest({ meal_date: MEAL_DATE, choice }, employee.cookie),
+        env
+      );
+
+    it('refuses a selection that does not say where, and writes nothing', async () => {
+      const res = await selectWithoutLocation(regular);
+
+      expect(res.status).toBe(400);
+      expect((await readJson(res)).error).toMatch(/where you will collect/i);
+      expect(
+        await countRows(db, 'SELECT COUNT(*) as n FROM lunch_selections WHERE employee_id = ?', regular.id)
+      ).toBe(0);
+    });
+
+    it('does NOT fall back to the employee’s usual canteen', async () => {
+      // The employee's default is OMCO. Before, omitting the location silently
+      // used it; a portion then went to the site they usually eat at rather
+      // than the one they are at that day.
+      const traveller = await seedEmployee(db, {
+        amcoId: 'TEST030',
+        rosterType: 'regular',
+        defaultLocation: 'omco_canteen',
+      });
+
+      expect((await selectWithoutLocation(traveller)).status).toBe(400);
+      expect(
+        await countRows(db, 'SELECT COUNT(*) as n FROM lunch_selections WHERE employee_id = ?', traveller.id)
+      ).toBe(0);
+
+      // With a location, it is recorded exactly as sent - not as their default.
+      const res = await select(traveller, 'option_1', MEAL_DATE, 'whc_canteen');
+      expect(res.status).toBe(201);
+      expect((await readJson(res)).data.pickup_location).toBe('whc_canteen');
+    });
+
+    it('still refuses an unrecognised canteen', async () => {
+      const res = await select(regular, 'option_1', MEAL_DATE, 'canteen_on_the_moon');
+      expect(res.status).toBe(400);
+      expect((await readJson(res)).error).toContain('pickup_location must be one of');
+    });
+  });
+
+  describe('an employee on the healthy meal', () => {
+    let healthy: SeededEmployee;
+
+    beforeEach(async () => {
+      healthy = await seedEmployee(db, {
+        amcoId: 'TEST040',
+        rosterType: 'regular',
+        mealPreference: 'healthy',
+      });
+    });
+
+    it('accepts the request their own screen actually sends: choice "healthy"', async () => {
+      // The locked portal card submits 'healthy'. An earlier draft validated the
+      // choice against Option 1/2 BEFORE looking up who was asking, and so
+      // refused every healthy-meal employee outright. The frontend test could
+      // not catch that - it stubs the server - so this one exists.
+      const res = await select(healthy, 'healthy', MEAL_DATE, 'whc_canteen');
+
+      expect(res.status).toBe(201);
+      const body = await readJson(res);
+      expect(body.data.choice).toBe('healthy');
+      expect(body.data.pickup_location).toBe('whc_canteen');
+    });
+
+    it('is recorded as healthy however the request tries to choose', async () => {
+      // A stale tab, or anyone calling the API directly, asks for option_2.
+      const res = await select(healthy, 'option_2');
+
+      expect(res.status).toBe(201);
+      expect((await readJson(res)).data.choice).toBe('healthy');
+
+      const stored = await db
+        .prepare('SELECT choice FROM lunch_selections WHERE employee_id = ?')
+        .bind(healthy.id)
+        .first<{ choice: string }>();
+      expect(stored!.choice).toBe('healthy');
+    });
+
+    it('still chooses WHERE to collect it', async () => {
+      const res = await select(healthy, 'option_1', MEAL_DATE, 'omco_canteen');
+      expect(res.status).toBe(201);
+      const body = await readJson(res);
+      expect(body.data.choice).toBe('healthy');
+      expect(body.data.pickup_location).toBe('omco_canteen');
+    });
+
+    it('re-submitting is still a no-op, so nothing is written twice', async () => {
+      await select(healthy, 'option_1');
+      db.executedWrites.length = 0;
+
+      const res = await select(healthy, 'option_2');
+      expect(res.status).toBe(200);
+      expect((await readJson(res)).changed).toBe(false);
+      expect(db.executedWrites).toHaveLength(0);
+    });
+
+    it('an ADMINISTRATOR may still override them, with a reason', async () => {
+      const res = await app.request(
+        `${BASE}/api/selections/admin/override`,
+        jsonRequest(
+          {
+            employee_id: healthy.id,
+            meal_date: MEAL_DATE,
+            choice: 'option_1',
+            override_reason: 'Requested in person at the counter',
+          },
+          admin.cookie
+        ),
+        env
+      );
+
+      expect(res.status).toBe(201);
+      expect((await readJson(res)).data.choice).toBe('option_1');
+    });
+  });
+
+  describe('lunch is chosen a day ahead', () => {
+    /** What the SERVER says today and the next orderable date are. */
+    const dates = async () => {
+      const res = await app.request(
+        `${BASE}/api/me/today`,
+        { headers: { Cookie: regular.cookie } },
+        env
+      );
+      return (await readJson(res)).data as { businessDate: string; selectableDate: string };
+    };
+
+    it('refuses today’s lunch, whatever the time of day', async () => {
+      const { businessDate } = await dates();
+      await seedMenuDay(db, businessDate, 'published');
+
+      const res = await select(regular, 'option_1', businessDate);
+
+      expect(res.status).toBe(400);
+      const body = (await readJson(res)) as { error: string; selectableDate: string };
+      expect(body.error).toMatch(/a day ahead/i);
+      expect(body.selectableDate > businessDate).toBe(true);
+    });
+
+    it('the date it offers instead is always in the future', async () => {
+      const { businessDate, selectableDate } = await dates();
+      expect(selectableDate > businessDate).toBe(true);
+    });
+
+    it('does not refuse that date on the deadline', async () => {
+      const { selectableDate } = await dates();
+      await seedMenuDay(db, selectableDate, 'published');
+
+      const res = await select(regular, 'option_1', selectableDate);
+
+      // Whether that weekday makes this employee eligible is a different rule,
+      // so 403 is an acceptable answer here. 400 would mean the DEADLINE
+      // refused the very date the server had just offered.
+      expect(res.status).not.toBe(400);
     });
   });
 

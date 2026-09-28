@@ -106,8 +106,9 @@ Route                     Bundle          Audience
 
 The requirement is "a few seconds." The home route must render the decision in one viewport with no scrolling on a typical phone:
 
-1. Today's date and both meal options, with the common components (condiment, beverage, dessert) shown as informational text under them.
-2. Three large tap targets: **Option 1**, **Option 2**, **No Preference**.
+1. The date being ordered — **tomorrow**, or the day after once today's cutoff has passed (lunch is ordered a day ahead) — and both meal options, with the common components (condiment, beverage, dessert) shown as informational text under them.
+2. Two large tap targets: **Option 1** and **Option 2**, with Option 1 pre-marked because it is what an employee who says nothing is served. *(Migration 0005 removed the original third target, No Preference — see "Superseded" below.)* An employee an administrator has put on the **healthy meal** sees that meal fixed instead of the options.
+2a. A required **Collect from** canteen, never pre-filled.
 3. Current selection state and the cutoff time ("You can change this until 10:00").
 4. If not eligible: no tap targets at all, replaced by a plain-language explanation and the next eligible date.
 
@@ -1524,3 +1525,28 @@ Selections, history, and audit records are currently kept indefinitely. If the c
 ---
 
 *End of Phase 0 proposal. No implementation will begin until this is reviewed and approved.*
+
+---
+
+## Superseded: No Preference, and same-day ordering (migration 0005)
+
+Parts of this document describe the original design and are kept as the record
+of why it was built that way. Four rules have since changed:
+
+- **No Preference no longer exists.** `choice` is `option_1 | option_2 | healthy`.
+  The kitchen had to cook something for every "no preference", so it was never a
+  preference — only an unanswered question. Existing rows were converted to
+  `option_1`.
+- **Not choosing means Option 1.** No row is written; the report counts every
+  eligible employee as exactly one portion, and reports how many of the Option 1
+  count were defaults ("of which not chosen"). The default applies only when a
+  menu is **published** — with no menu there is no Option 1 to cook.
+- **The healthy meal** is set on the employee (`employees.meal_preference`) by an
+  administrator. The server records `healthy` for them whatever the request asks,
+  and they cannot change it themselves; the report gives it its own column.
+- **Lunch is ordered a day ahead.** The deadline for a meal on date D is the
+  cutoff on D−1, so today's lunch is always closed; the portal offers tomorrow
+  before the cutoff and the day after once it passes. The collection canteen is
+  required on every submission and is never inferred from the employee's usual
+  one.
+

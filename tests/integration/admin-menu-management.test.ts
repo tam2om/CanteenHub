@@ -459,7 +459,7 @@ describe('Admin menu management', () => {
     const select = (date: string, cookie: string) =>
       app.request(
         `${BASE}/api/selections/me`,
-        jsonRequest({ meal_date: date, choice: 'option_1' }, cookie),
+        jsonRequest({ meal_date: date, choice: 'option_1', pickup_location: 'amco_canteen' }, cookie),
         env
       );
 
@@ -649,7 +649,7 @@ describe('Admin menu management', () => {
 
       const selection = await app.request(
         `${BASE}/api/selections/me`,
-        jsonRequest({ meal_date: '2027-03-01', choice: 'option_1' }, employee.cookie),
+        jsonRequest({ meal_date: '2027-03-01', choice: 'option_1', pickup_location: 'amco_canteen' }, employee.cookie),
         env
       );
       expect(selection.status).toBeLessThan(300);
