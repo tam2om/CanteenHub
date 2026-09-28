@@ -8,6 +8,7 @@ import type { ReactNode } from 'react';
 import { Link, NavLink } from 'react-router-dom';
 import { useLogout, useSession } from '../hooks/useSession.js';
 import amcoMark from '../assets/amco-mark.png';
+import { SiteFooter } from './SiteFooter.js';
 import { isFullAdminRole, roleLabel } from '../lib/permissions.js';
 
 export function AdminLayout({ children }: { children: ReactNode }) {
@@ -90,6 +91,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
       </header>
 
       {children}
+      <SiteFooter />
     </div>
   );
 }

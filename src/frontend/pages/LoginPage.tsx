@@ -12,6 +12,7 @@ import { useLogin, useSession } from '../hooks/useSession.js';
 import { ApiError } from '../api/client.js';
 import { LoadingState } from '../components/States.js';
 import amcoLogo from '../assets/amco-logo.png';
+import { SiteFooter } from '../components/SiteFooter.js';
 
 export function LoginPage() {
   const { isAuthenticated, isLoading } = useSession();
@@ -104,6 +105,7 @@ export function LoginPage() {
             Forgotten your password? Ask the canteen administrator to set a new one.
           </p>
         </div>
+        <SiteFooter />
       </div>
     </main>
   );
