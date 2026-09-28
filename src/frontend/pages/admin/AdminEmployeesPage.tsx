@@ -19,6 +19,8 @@ import { ConfirmDialog } from '../../components/ConfirmDialog.js';
 import { EmployeeFormPanel } from './EmployeeFormPanel.js';
 import { PasswordPanel } from './PasswordPanel.js';
 import { ROSTER_LABELS } from '../../lib/format.js';
+import { useSession } from '../../hooks/useSession.js';
+import { canActOn, canManageAccounts } from '../../lib/permissions.js';
 import type { AdminEmployee, EmployeeFilters, RosterType } from '../../types/index.js';
 
 const PAGE_SIZE = 20;
@@ -36,6 +38,10 @@ export function AdminEmployeesPage() {
   const [isActive, setIsActive] = useState<'true' | 'false' | ''>('');
   const [page, setPage] = useState(1);
   const [panel, setPanel] = useState<Panel>({ kind: 'none' });
+  const { user } = useSession();
+  // Supervisors edit details only. Creating people, passwords and activation
+  // are administrators' - the server refuses them regardless of this.
+  const manageAccounts = canManageAccounts(user?.role);
 
   // Debounced so typing does not fire a request per keystroke.
   const debouncedSearch = useDebounced(search, 300);
@@ -59,13 +65,15 @@ export function AdminEmployeesPage() {
     <main className="page">
       <div className="page__head">
         <h1 className="page__title">Employees</h1>
-        <button
-          type="button"
-          className="button button--primary button--inline"
-          onClick={() => setPanel({ kind: 'create' })}
-        >
-          Add employee
-        </button>
+        {manageAccounts && (
+          <button
+            type="button"
+            className="button button--primary button--inline"
+            onClick={() => setPanel({ kind: 'create' })}
+          >
+            Add employee
+          </button>
+        )}
       </div>
 
       {panel.kind === 'create' && (
@@ -167,29 +175,38 @@ export function AdminEmployeesPage() {
                     </div>
                   </div>
 
-                  <div className="list__actions">
-                    <button
-                      type="button"
-                      className="button button--ghost button--small"
-                      onClick={() => setPanel({ kind: 'edit', employee })}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      className="button button--ghost button--small"
-                      onClick={() => setPanel({ kind: 'password', employee })}
-                    >
-                      Set password
-                    </button>
-                    <button
-                      type="button"
-                      className="button button--ghost button--small"
-                      onClick={() => setPanel({ kind: 'status', employee })}
-                    >
-                      {active ? 'Deactivate' : 'Activate'}
-                    </button>
-                  </div>
+                  {/* No buttons at all for someone this user may not change -
+                      a super administrator, as seen by an administrator; or
+                      anyone but an employee, as seen by a supervisor. */}
+                  {canActOn(user?.role, employee.role_id) && (
+                    <div className="list__actions">
+                      <button
+                        type="button"
+                        className="button button--ghost button--small"
+                        onClick={() => setPanel({ kind: 'edit', employee })}
+                      >
+                        Edit
+                      </button>
+                      {manageAccounts && (
+                        <>
+                          <button
+                            type="button"
+                            className="button button--ghost button--small"
+                            onClick={() => setPanel({ kind: 'password', employee })}
+                          >
+                            Set password
+                          </button>
+                          <button
+                            type="button"
+                            className="button button--ghost button--small"
+                            onClick={() => setPanel({ kind: 'status', employee })}
+                          >
+                            {active ? 'Deactivate' : 'Activate'}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
 
                   {panel.kind === 'edit' && panel.employee.id === employee.id && (
                     <EmployeeFormPanel

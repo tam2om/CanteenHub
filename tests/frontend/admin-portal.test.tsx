@@ -259,7 +259,9 @@ describe('Search and filtering', () => {
 describe('Create employee', () => {
   const openForm = async (user: ReturnType<typeof userEvent.setup>) => {
     await screen.findByRole('heading', { name: 'Employees' });
-    await user.click(screen.getByRole('button', { name: 'Add employee' }));
+    // Waited for, not grabbed: the button appears once the viewer is known to
+    // be an administrator (a supervisor is never offered it).
+    await user.click(await screen.findByRole('button', { name: 'Add employee' }));
     return within(await screen.findByRole('region', { name: 'Add employee' }));
   };
 

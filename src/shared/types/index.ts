@@ -7,7 +7,12 @@
 // ROLES & AUTHORIZATION
 // ============================================================================
 
-export type Role = 'employee' | 'admin' | 'super_admin';
+/**
+ * `supervisor` keeps their own employee portal and, in the admin area, may only
+ * edit employees' details and read the lunch report. The exact endpoints are an
+ * allowlist in routes/admin.ts; everything else there stays administrator-only.
+ */
+export type Role = 'employee' | 'admin' | 'super_admin' | 'supervisor';
 
 // ============================================================================
 // EMPLOYEE & ROSTER TYPES

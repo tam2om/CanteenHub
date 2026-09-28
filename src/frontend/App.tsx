@@ -72,7 +72,7 @@ export function App() {
       <Route
         path="/admin/employees"
         element={
-          <RequireAdmin>
+          <RequireAdmin allowSupervisor>
             <AdminLayout>
               <AdminEmployeesPage />
             </AdminLayout>
@@ -106,7 +106,7 @@ export function App() {
       <Route
         path="/admin/reports"
         element={
-          <RequireAdmin>
+          <RequireAdmin allowSupervisor>
             <AdminLayout>
               <AdminReportsPage />
             </AdminLayout>

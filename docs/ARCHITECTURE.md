@@ -1550,3 +1550,31 @@ of why it was built that way. Four rules have since changed:
   required on every submission and is never inferred from the employee's usual
   one.
 
+---
+
+## Roles (migration 0006)
+
+| | Employee | Supervisor | Admin | Super admin |
+|---|---|---|---|---|
+| Own portal (choose meal, history, profile) | ✅ | ✅ | ✅ | ✅ |
+| List employees; edit an **employee's** details | — | ✅ | ✅ | ✅ |
+| View / download the lunch report | — | ✅ | ✅ | ✅ |
+| Create employees, set passwords, activate / deactivate | — | — | ✅ | ✅ |
+| Change roles; imports, menus, roster, settings, holidays, meal overrides | — | — | ✅ | ✅ |
+| Grant the super admin role; change a **super admin's** account in any way | — | — | — | ✅ |
+
+- A supervisor edits **employees only** — not other supervisors, not
+  administrators — and cannot change anyone's role.
+- Supervisor access is a **default-deny allowlist** of four endpoints
+  (`SUPERVISOR_ENDPOINTS` in `routes/admin.ts`). A new admin endpoint is
+  administrator-only until someone deliberately adds it there.
+- A super administrator's account — details, password, active status, role —
+  is changed only by a super administrator. Guarding the role alone was not
+  enough: an administrator who could set a super administrator's *password*
+  could sign in as them.
+- Role ids ↔ names are mapped in exactly one place, `src/worker/lib/roles.ts`.
+- `roles` was rebuilt to add `supervisor` (id 4). Because every employee row
+  references it and D1 cannot turn foreign keys off, the table is recreated
+  under its own name and its rows re-inserted inside one transaction — the
+  build-and-rename recipe fails at commit. See the migration's header.
+

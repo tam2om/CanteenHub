@@ -4,6 +4,8 @@
  */
 
 import { Context, Next } from 'hono';
+import type { Role } from '../../shared/types/index.js';
+import { roleName } from '../lib/roles.js';
 import type { Env, Variables, AuthenticatedVariables } from '../types/env.js';
 import { getSessionByToken } from '../db/sessions.js';
 import { getEmployeeById } from '../db/employees.js';
@@ -55,14 +57,14 @@ export async function sessionMiddleware(c: Context<{ Bindings: Env; Variables: V
     c.set('session', {
       employee_id: session.employee_id,
       amco_id: employee.amco_id,
-      role: getRoleName(employee.role_id),
+      role: roleName(employee.role_id),
       issued_at: Math.floor(Date.now() / 1000),
       expires_at: Math.floor(new Date(session.expires_at).getTime() / 1000),
     });
     
     c.set('employee', {
       ...employee,
-      role: getRoleName(employee.role_id),
+      role: roleName(employee.role_id),
     });
     
   } catch (error) {
@@ -100,7 +102,7 @@ export async function requireAuth(
  * `roles.includes(role)` was never true and every admin route rejected every
  * admin. Flattening the argument list makes both spellings behave identically.
  */
-export type RoleName = 'employee' | 'admin' | 'super_admin';
+export type RoleName = Role;
 
 export function requireRole(...roles: Array<RoleName | RoleName[]>) {
   const allowed = roles.flat();
@@ -138,16 +140,4 @@ function parseCookies(cookieString: string): Map<string, string> {
   }
   
   return cookies;
-}
-
-/**
- * Get role name from role_id
- */
-function getRoleName(roleId: number): 'employee' | 'admin' | 'super_admin' {
-  switch (roleId) {
-    case 1: return 'employee';
-    case 2: return 'admin';
-    case 3: return 'super_admin';
-    default: return 'employee';
-  }
 }

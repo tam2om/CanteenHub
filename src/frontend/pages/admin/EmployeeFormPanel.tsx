@@ -56,6 +56,7 @@ export function EmployeeFormPanel({ mode, employee, onClose }: Props) {
   const [roleId, setRoleId] = useState<number>(employee?.role_id ?? 1);
   const { user } = useSession();
   const isSuperAdmin = user?.role === 'super_admin';
+  const isSupervisor = user?.role === 'supervisor';
   const [clientError, setClientError] = useState<string | null>(null);
 
   const create = useCreateEmployee();
@@ -218,27 +219,31 @@ export function EmployeeFormPanel({ mode, employee, onClose }: Props) {
           </span>
         </label>
 
-        {/* Role. The super administrator option is offered only to a super
-            administrator - and the SERVER refuses it regardless of what this
-            form sends, which is what actually enforces the rule. */}
-        <label className="field">
-          <span className="field__label">Role</span>
-          <select
-            className="field__input"
-            name="role_id"
-            value={roleId}
-            onChange={(e) => setRoleId(Number(e.target.value))}
-          >
-            <option value={1}>Employee</option>
-            <option value={2}>Administrator</option>
-            {(isSuperAdmin || roleId === 3) && <option value={3}>Super administrator</option>}
-          </select>
-          {!isSuperAdmin && (
+        {/* Role. Not shown to a supervisor at all: who holds which role is an
+            administrator's decision. The super administrator option is offered
+            only to a super administrator. In both cases the SERVER refuses the
+            change regardless of what this form sends - that is the control. */}
+        {!isSupervisor && (
+          <label className="field">
+            <span className="field__label">Role</span>
+            <select
+              className="field__input"
+              name="role_id"
+              value={roleId}
+              onChange={(e) => setRoleId(Number(e.target.value))}
+            >
+              <option value={1}>Employee</option>
+              <option value={4}>Supervisor</option>
+              <option value={2}>Administrator</option>
+              {(isSuperAdmin || roleId === 3) && <option value={3}>Super administrator</option>}
+            </select>
             <span className="field__hint">
-              Only a super administrator can grant the super administrator role.
+              A supervisor keeps their own portal and can also edit employees’ details and
+              download reports.
+              {!isSuperAdmin && ' Only a super administrator can grant the super administrator role.'}
             </span>
-          )}
-        </label>
+          </label>
+        )}
 
         {(clientError || serverError) && (
           <p className="feedback feedback--error" role="alert">
