@@ -145,7 +145,7 @@ export interface SessionUser {
 // ============================================================================
 
 /** Role ids as stored in the employees table (see migration 0001). */
-export const ROLE_IDS = { employee: 1, admin: 2, super_admin: 3 } as const;
+export const ROLE_IDS = { employee: 1, admin: 2, super_admin: 3, supervisor: 4 } as const;
 export type RoleName = keyof typeof ROLE_IDS;
 
 /** An employee row as the admin API returns it - never carries password_hash. */

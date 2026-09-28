@@ -5,7 +5,7 @@
 
 import { NavLink } from 'react-router-dom';
 import { useLogout, useSession } from '../hooks/useSession.js';
-import { isAdminRole } from './RequireAdmin.js';
+import { isBackOfficeRole } from '../lib/permissions.js';
 import amcoMark from '../assets/amco-mark.png';
 
 export function AppHeader() {
@@ -45,14 +45,15 @@ export function AppHeader() {
         <NavLink to="/profile" className={({ isActive }) => `nav__link ${isActive ? 'nav__link--active' : ''}`}>
           Profile
         </NavLink>
-        {/* Shown to admins as a convenience. Hiding it is NOT the control -
-            the server rejects a non-admin at every /api/admin endpoint. */}
-        {isAdminRole(user?.role) && (
+        {/* Shown to administrators and supervisors as a convenience. Hiding it
+            is NOT the control - the server refuses anyone else at every
+            /api/admin endpoint. */}
+        {isBackOfficeRole(user?.role) && (
           <NavLink
             to="/admin/employees"
             className={({ isActive }) => `nav__link ${isActive ? 'nav__link--active' : ''}`}
           >
-            Admin
+            {user?.role === 'supervisor' ? 'Supervisor' : 'Admin'}
           </NavLink>
         )}
       </nav>

@@ -147,6 +147,20 @@ For each of employees, roster and menu:
 
 ---
 
+## 7a. Roles — supervisor and super administrator
+
+| # | Step | Expected |
+|---|---|---|
+| 7a.1 | As an admin, set an employee's role to **Supervisor** | ✅ saved |
+| 7a.2 | Sign in as that supervisor | ✅ own portal works; header shows a **Supervisor** link |
+| 7a.3 | Open the supervisor area | ✅ only **Employees**, **Reports**, **My portal** in the navigation |
+| 7a.4 | Edit an employee's name / department / canteen / meal | ✅ saved — ❌ no Role field, no Add employee, no Set password, no Deactivate |
+| 7a.5 | Look at an admin's or another supervisor's row | ✅ no buttons at all |
+| 7a.6 | Download the lunch report as Excel | ✅ downloads |
+| 7a.7 | Type `/admin/settings` into the address bar | ✅ lands on Employees — ❌ never shows Settings |
+| 7a.8 | As an **admin**, look at a super administrator's row | ✅ no buttons at all (not even Set password) |
+| 7a.9 | As a **super admin**, look at another super administrator's row | ✅ Edit, Set password, Deactivate |
+
 ## 8. Operational invariants
 
 | # | Check | Expected |

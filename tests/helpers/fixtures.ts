@@ -13,6 +13,7 @@ import type { Env } from '../../src/worker/types/env.js';
 export const ROLE_EMPLOYEE = 1;
 export const ROLE_ADMIN = 2;
 export const ROLE_SUPER_ADMIN = 3;
+export const ROLE_SUPERVISOR = 4;
 
 export interface SeededEmployee {
   id: number;

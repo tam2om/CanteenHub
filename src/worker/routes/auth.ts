@@ -3,6 +3,7 @@
  */
 
 import { Hono } from 'hono';
+import { roleName } from '../lib/roles.js';
 import type { Env, Variables } from '../types/env.js';
 import { getEmployeeForAuth, setEmployeePassword } from '../db/employees.js';
 import { createSession, deleteSessionByToken, deleteSessionsForEmployee } from '../db/sessions.js';
@@ -95,7 +96,7 @@ authRoutes.post('/login', async (c) => {
     await createSession(c.env.DB, sessionTokenHash, employee.id, expiresAt);
     
     // Get role name
-    const roleName = getRoleName(employee.role_id);
+    const role = roleName(employee.role_id);
     
     // Set session cookie
     const cookieValue = `canteenhub_session=${sessionToken}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=86400`;
@@ -108,7 +109,7 @@ authRoutes.post('/login', async (c) => {
           id: employee.id,
           amco_id: employee.amco_id,
           full_name: employee.full_name,
-          role: roleName,
+          role,
         },
       },
     });
@@ -305,16 +306,4 @@ function parseCookies(cookieString: string): Map<string, string> {
   }
   
   return cookies;
-}
-
-/**
- * Get role name from role_id
- */
-function getRoleName(roleId: number): 'employee' | 'admin' | 'super_admin' {
-  switch (roleId) {
-    case 1: return 'employee';
-    case 2: return 'admin';
-    case 3: return 'super_admin';
-    default: return 'employee';
-  }
 }

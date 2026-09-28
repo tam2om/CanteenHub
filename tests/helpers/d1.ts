@@ -190,7 +190,20 @@ export function createTestDb(): TestD1Database {
     .sort();
 
   for (const file of migrationFiles) {
-    sqlite.exec(readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8'));
+    // ONE TRANSACTION PER FILE, as D1 applies a migration. This is not
+    // cosmetic: a migration that rebuilds a table other rows point at (0006
+    // rebuilds `roles`) relies on `PRAGMA defer_foreign_keys`, which only lasts
+    // for the current transaction. Applied statement by statement - as this
+    // loop used to - that migration fails here while succeeding in production,
+    // and the test database stops describing the real one.
+    sqlite.exec('BEGIN');
+    try {
+      sqlite.exec(readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8'));
+      sqlite.exec('COMMIT');
+    } catch (error) {
+      sqlite.exec('ROLLBACK');
+      throw new Error(`Migration ${file} failed: ${(error as Error).message}`);
+    }
   }
 
   return new TestD1(sqlite) as unknown as TestD1Database;

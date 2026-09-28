@@ -7,6 +7,11 @@
  * Every route in this file sits behind requireAuth + requireRole, applied to the
  * whole router rather than per-endpoint, so a newly added admin endpoint
  * inherits the guard instead of needing someone to remember it.
+ *
+ * SUPERVISORS are let into this router and then limited to an explicit
+ * allowlist (SUPERVISOR_ENDPOINTS). It is deliberately an allowlist rather than
+ * a list of what they may NOT do: an endpoint added here tomorrow is
+ * administrator-only until somebody decides otherwise.
  */
 
 import { Hono } from 'hono';
@@ -34,6 +39,8 @@ import {
   MEAL_PREFERENCES,
 } from '../../shared/types/index.js';
 import { buildXlsx, XLSX_CONTENT_TYPE, type CellValue } from '../lib/xlsxWrite.js';
+import { ASSIGNABLE_ROLE_IDS, BACK_OFFICE_ROLES, ROLE_IDS } from '../lib/roles.js';
+import type { Role } from '../../shared/types/index.js';
 import { listHolidays, upsertHoliday, deleteHoliday } from '../repositories/holidays.repo.js';
 import {
   logEmployeeChange,
@@ -46,7 +53,38 @@ const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // Guard the entire router. Authentication first, then role.
 app.use('*', requireAuth);
-app.use('*', requireRole(['admin', 'super_admin']));
+app.use('*', requireRole([...BACK_OFFICE_ROLES]));
+
+/**
+ * Everything a supervisor may reach in the admin area - and nothing else.
+ *
+ *   GET  /employees           find the person
+ *   PUT  /employees/:id       edit their details (further limited in the handler)
+ *   GET  /reports/lunch       read the report
+ *   GET  /reports/lunch.xlsx  download it
+ *
+ * NOT here, and therefore refused: creating employees, activating or
+ * deactivating them, setting passwords, imports, menus, roster, settings,
+ * holidays. Matched on the full request path, anchored at both ends, so
+ * `/employees/5/password` can never match `/employees/:id`.
+ */
+const SUPERVISOR_ENDPOINTS: ReadonlyArray<readonly [string, RegExp]> = [
+  ['GET', /^\/api\/admin\/employees$/],
+  ['PUT', /^\/api\/admin\/employees\/\d+$/],
+  ['GET', /^\/api\/admin\/reports\/lunch$/],
+  ['GET', /^\/api\/admin\/reports\/lunch\.xlsx$/],
+];
+
+app.use('*', async (c, next) => {
+  if (c.get('session')!.role !== 'supervisor') return next();
+  const allowed = SUPERVISOR_ENDPOINTS.some(
+    ([method, path]) => c.req.method === method && path.test(c.req.path)
+  );
+  if (!allowed) {
+    return c.json({ success: false, error: 'Insufficient permissions' }, 403);
+  }
+  return next();
+});
 
 const ROSTER_TYPES = ['regular', 'shift', 'amman_hq'] as const;
 const CUTOFF_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -54,8 +92,7 @@ const CUTOFF_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const clientIp = (c: { req: { header: (n: string) => string | undefined } }) =>
   c.req.header('X-Forwarded-For') || null;
 
-/** roles.id, as seeded by migration 0001. */
-const ROLE_SUPER_ADMIN = 3;
+const ROLE_SUPER_ADMIN = ROLE_IDS.super_admin;
 
 /**
  * Only a super administrator may create one, or change one.
@@ -85,6 +122,34 @@ function refuseSuperAdminChange(
     requestedRoleId !== ROLE_SUPER_ADMIN
   ) {
     return 'Only a super administrator can change a super administrator\'s role.';
+  }
+  return null;
+}
+
+/**
+ * May this actor change THIS person's account at all?
+ *
+ * Two rules, checked wherever an account is changed - its details, its active
+ * status, or its password:
+ *
+ *   - A super administrator's account is changed only by a super
+ *     administrator. Guarding just the role field was not enough: an
+ *     administrator who could set a super administrator's PASSWORD could sign
+ *     in as them and hold the role anyway, and one who could deactivate them
+ *     could lock them out.
+ *   - A supervisor looks after employees only - not other supervisors, and not
+ *     administrators of either kind.
+ *
+ * Returns the refusal message, or null when the change is allowed.
+ */
+function refuseActingOn(actorRole: Role, target: { role_id: number }): string | null {
+  // The supervisor rule first, so a supervisor is told the rule that actually
+  // applies to them, whoever the target is.
+  if (actorRole === 'supervisor' && target.role_id !== ROLE_IDS.employee) {
+    return 'A supervisor can edit employees only, not supervisors or administrators.';
+  }
+  if (target.role_id === ROLE_IDS.super_admin && actorRole !== 'super_admin') {
+    return "Only a super administrator can change a super administrator's account.";
   }
   return null;
 }
@@ -153,8 +218,14 @@ app.post('/employees', async (c) => {
   if (!roster_type || !ROSTER_TYPES.includes(roster_type)) {
     return c.json({ success: false, error: `roster_type must be one of: ${ROSTER_TYPES.join(', ')}` }, 400);
   }
-  if (role_id !== undefined && ![1, 2, 3].includes(role_id)) {
-    return c.json({ success: false, error: 'role_id must be 1 (employee), 2 (admin) or 3 (super_admin)' }, 400);
+  if (role_id !== undefined && !ASSIGNABLE_ROLE_IDS.includes(role_id)) {
+    return c.json(
+      {
+        success: false,
+        error: 'role_id must be 1 (employee), 2 (admin), 3 (super_admin) or 4 (supervisor)',
+      },
+      400
+    );
   }
   if (default_location !== undefined && !isMealLocation(default_location)) {
     return c.json(
@@ -239,8 +310,14 @@ app.put('/employees/:id', async (c) => {
   if (roster_type !== undefined && !ROSTER_TYPES.includes(roster_type)) {
     return c.json({ success: false, error: `roster_type must be one of: ${ROSTER_TYPES.join(', ')}` }, 400);
   }
-  if (role_id !== undefined && ![1, 2, 3].includes(role_id)) {
-    return c.json({ success: false, error: 'role_id must be 1 (employee), 2 (admin) or 3 (super_admin)' }, 400);
+  if (role_id !== undefined && !ASSIGNABLE_ROLE_IDS.includes(role_id)) {
+    return c.json(
+      {
+        success: false,
+        error: 'role_id must be 1 (employee), 2 (admin), 3 (super_admin) or 4 (supervisor)',
+      },
+      400
+    );
   }
   if (default_location !== undefined && !isMealLocation(default_location)) {
     return c.json(
@@ -261,7 +338,20 @@ app.put('/employees/:id', async (c) => {
     );
   }
 
-  const refusal = refuseSuperAdminChange(c.get('session')!.role, role_id, existing.role_id);
+  const actorRole = c.get('session')!.role;
+
+  const actingRefusal = refuseActingOn(actorRole, existing);
+  if (actingRefusal) return c.json({ success: false, error: actingRefusal }, 403);
+
+  // A supervisor edits DETAILS. Who holds which role is an administrator's
+  // decision, so any attempt to change it is refused outright rather than
+  // silently ignored - a caller told "saved" when the role did not change
+  // would be misled.
+  if (actorRole === 'supervisor' && role_id !== undefined && role_id !== existing.role_id) {
+    return c.json({ success: false, error: "A supervisor cannot change anyone's role." }, 403);
+  }
+
+  const refusal = refuseSuperAdminChange(actorRole, role_id, existing.role_id);
   if (refusal) return c.json({ success: false, error: refusal }, 403);
 
   const beforeJson = JSON.stringify(toPublicEmployee(existing));
@@ -316,6 +406,9 @@ app.put('/employees/:id/status', async (c) => {
   if (!existing) {
     return c.json({ success: false, error: 'Employee not found' }, 404);
   }
+
+  const refusal = refuseActingOn(c.get('session')!.role, existing);
+  if (refusal) return c.json({ success: false, error: refusal }, 403);
 
   const beforeJson = JSON.stringify(toPublicEmployee(existing));
   const updated = await updateEmployee(db, id, { is_active });
@@ -375,6 +468,11 @@ app.put('/employees/:id/password', async (c) => {
   if (!employee) {
     return c.json({ success: false, error: 'Employee not found' }, 404);
   }
+
+  // Checked BEFORE hashing: a refused request must not cost the Worker a
+  // deliberate 57 ms of PBKDF2, and must not touch the stored hash.
+  const refusal = refuseActingOn(c.get('session')!.role, employee);
+  if (refusal) return c.json({ success: false, error: refusal }, 403);
 
   try {
     // The EXISTING hashing implementation (PBKDF2-SHA-256, 100k iterations).
