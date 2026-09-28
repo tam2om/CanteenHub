@@ -292,12 +292,14 @@ describe('Meal collection points', () => {
       expect(rows.some((r) => r[0] === 'WHC Canteen')).toBe(true);
     });
 
-    it('the Totals sheet counts employees on the healthy meal in their own column', async () => {
-      await seedEmployee(db, {
+    it('the Totals sheet counts a CONFIRMED healthy meal in its own column', async () => {
+      const healthy = await seedEmployee(db, {
         amcoId: 'TEST630',
         defaultLocation: 'whc_canteen',
         mealPreference: 'healthy',
       });
+      // They log in and confirm the day - what their own screen sends.
+      await select(healthy.cookie, { meal_date: DATE, choice: 'healthy', pickup_location: 'whc_canteen' });
 
       const buffer = await (await download(admin.cookie)).arrayBuffer();
       const sheet = await readWorksheet(buffer, 'Totals');
@@ -308,6 +310,23 @@ describe('Meal collection points', () => {
       expect(whcRow[4]).toBe('1'); // and it IS a portion to send
     });
 
+    it('an UNCONFIRMED healthy meal is not prepared, and the sheet says how many', async () => {
+      await seedEmployee(db, {
+        amcoId: 'TEST631',
+        defaultLocation: 'whc_canteen',
+        mealPreference: 'healthy',
+      }); // on leave: never logs in
+
+      const buffer = await (await download(admin.cookie)).arrayBuffer();
+      const sheet = await readWorksheet(buffer, 'Totals');
+      const rows = sheet.rows.map((r) => [...r.cells.values()]);
+
+      const whcRow = rows.find((r) => r[0] === 'WHC Canteen')!;
+      expect(whcRow[3]).toBe('0');
+      expect(whcRow[4]).toBe('0');
+      expect(rows.find((r) => r[0] === 'Healthy meal not confirmed (not prepared)')![1]).toBe('1');
+    });
+
     it('the Detail sheet says what is served AND whether it was chosen', async () => {
       await select(employee.cookie, {
         meal_date: DATE,
@@ -315,7 +334,9 @@ describe('Meal collection points', () => {
         pickup_location: 'omco_canteen',
       });
       await seedEmployee(db, { amcoId: 'TEST640' }); // chooses nothing
-      await seedEmployee(db, { amcoId: 'TEST650', mealPreference: 'healthy' });
+      const confirmed = await seedEmployee(db, { amcoId: 'TEST650', mealPreference: 'healthy' });
+      await select(confirmed.cookie, { meal_date: DATE, choice: 'healthy', pickup_location: 'amco_canteen' });
+      await seedEmployee(db, { amcoId: 'TEST660', mealPreference: 'healthy' }); // does not confirm
 
       const buffer = await (await download(admin.cookie)).arrayBuffer();
       const sheet = await readWorksheet(buffer, 'Detail');
@@ -338,7 +359,14 @@ describe('Meal collection points', () => {
 
       const healthy = rows.find((r) => r[0] === 'TEST650')!;
       expect(healthy[7]).toBe('Healthy meal');
-      expect(healthy[8]).toContain('set by admin');
+      expect(healthy[8]).toBe('Healthy meal (confirmed)');
+
+      // Eligible, on the healthy meal, never confirmed: nothing served, and the
+      // row says why rather than looking like an oversight. Matched as whole
+      // cells, since an empty "Served" cell may not be written at all.
+      const unconfirmed = rows.find((r) => r[0] === 'TEST660')!;
+      expect(unconfirmed).toContain('Healthy meal - NOT confirmed');
+      expect(unconfirmed).not.toContain('Healthy meal');
     });
 
     it('exports a date with no menu without failing', async () => {

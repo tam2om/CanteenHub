@@ -118,10 +118,19 @@ function ReportBody({ report }: { report: LunchReport }) {
           </li>
         </ul>
         <p className="panel__note">
-          Every eligible employee counts as exactly one portion. An employee who chose nothing is
-          served Option 1 and is already inside that number — the last figure says how many of them
-          there are. The healthy meal is set on the employee by an administrator, not chosen.
+          An eligible employee who chose nothing is served Option 1 and is already inside that
+          number — the last figure says how many of them there are. The healthy meal is counted
+          only for employees on it who confirmed this date; one who did not (on leave, say) gets
+          nothing prepared.
         </p>
+
+        {(selections.healthy_not_confirmed ?? 0) > 0 && (
+          <p className="feedback feedback--warn" role="status">
+            {selections.healthy_not_confirmed} healthy-meal employee
+            {selections.healthy_not_confirmed === 1 ? ' has' : 's have'} not confirmed this date,
+            so no healthy meal is being prepared for them.
+          </p>
+        )}
       </section>
 
       {/* ---------------- per canteen ---------------- */}

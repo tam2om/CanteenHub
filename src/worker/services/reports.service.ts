@@ -122,6 +122,13 @@ export interface LunchReport {
      */
     defaulted_to_option_1: number;
     /**
+     * Healthy-meal employees who are eligible but did NOT submit for this date
+     * - on leave, say. No portion is prepared for them; this says how many
+     * there are, so the numbers reconcile and a missing confirmation can be
+     * chased before the kitchen closes.
+     */
+    healthy_not_confirmed: number;
+    /**
      * Selections held by employees who are NOT eligible on this date - for
      * instance someone whose roster changed after they ordered. Surfaced rather
      * than silently dropped, but deliberately kept out of the portion counts:
@@ -163,17 +170,23 @@ type ReportEmployee = Pick<
  * behind both the totals and the per-person Excel sheet, so the two can never
  * disagree.
  *
- * In priority order:
- *   1. The healthy meal, if an administrator has put them on it. That is a
- *      property of the person, so it holds even over an old selection row
- *      from before the change.
- *   2. Whatever they chose.
- *   3. Option 1 - not choosing is not a reason to go hungry.
+ * HEALTHY-MEAL EMPLOYEES MUST CONFIRM. A healthy meal is prepared individually,
+ * so it is counted only when the employee has actually submitted for that day
+ * - one who is on leave, travelling or off sick simply does not submit, and no
+ * portion is made for them. The first version counted every healthy-meal
+ * employee every day they were eligible, which cooked meals for people who were
+ * not there. Once they HAVE submitted, it is `healthy` whatever the row says,
+ * because the meal type is a property of the person, not of the request.
  *
- * BUT ONLY WHEN LUNCH IS BEING SERVED. With no published menu there is no
- * Option 1 to cook, and counting a default portion of it would fabricate a
- * number the kitchen then prepares for. An explicit selection row (which only
- * an administrator's override can create without a published menu) is still
+ * Everyone else:
+ *   1. Whatever they chose.
+ *   2. Option 1 if they chose nothing - not choosing is not a reason to go
+ *      hungry, and the menu portions are cooked in bulk anyway.
+ *
+ * ONLY WHEN LUNCH IS BEING SERVED. With no published menu there is no Option 1
+ * to cook, and counting a default portion of it would fabricate a number the
+ * kitchen then prepares for. An explicit selection row (which only an
+ * administrator's override can create without a published menu) is still
  * honoured; the default is not applied. `null` means nothing is served.
  */
 export function servedMeal(
@@ -181,8 +194,8 @@ export function servedMeal(
   choice: LunchChoice | null,
   menuPublished: boolean
 ): LunchChoice | null {
+  if (preference === 'healthy') return choice === null ? null : 'healthy';
   if (choice === null && !menuPublished) return null;
-  if (preference === 'healthy') return 'healthy';
   return choice ?? DEFAULT_LUNCH_CHOICE;
 }
 
@@ -253,6 +266,7 @@ export async function buildLunchReport(
   const counts = { option_1: 0, option_2: 0, healthy: 0 };
   let eligible = 0;
   let defaultedToOption1 = 0;
+  let healthyNotConfirmed = 0;
   let ineligibleWithSelection = 0;
 
   const byReason = new Map<AnyEligibilityReason, number>();
@@ -288,10 +302,15 @@ export async function buildLunchReport(
     const bucket = byLocation.get(location) ?? byLocation.get(DEFAULT_MEAL_LOCATION)!;
 
     // WHAT THIS PERSON IS COOKED FOR - see `servedMeal`. When lunch is being
-    // served, every eligible employee contributes exactly one portion, which
-    // is what makes `total` a number the kitchen can load a trolley from.
+    // served, every eligible employee contributes exactly one portion, except
+    // a healthy-meal employee who has not confirmed the day - they get none.
     const served = servedMeal(employee.meal_preference, choice, menuPublished);
-    if (served === null) continue;
+    if (served === null) {
+      if (employee.meal_preference === 'healthy' && choice === null) {
+        healthyNotConfirmed += 1;
+      }
+      continue;
+    }
 
     counts[served] += 1;
     bucket[served] += 1;
@@ -331,6 +350,7 @@ export async function buildLunchReport(
     selections: {
       ...counts,
       defaulted_to_option_1: defaultedToOption1,
+      healthy_not_confirmed: healthyNotConfirmed,
       ineligible_with_selection: ineligibleWithSelection,
     },
     eligibility: { by_reason: toReasonCounts(byReason) },

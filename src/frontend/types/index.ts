@@ -393,6 +393,8 @@ export interface LunchReport {
     healthy: number;
     /** Eligible employees who chose nothing. Already counted inside option_1. */
     defaulted_to_option_1: number;
+    /** Healthy-meal employees who did not confirm this date: nothing is prepared. */
+    healthy_not_confirmed?: number;
     ineligible_with_selection: number;
   };
   eligibility: { by_reason: ReportReasonCount[] };

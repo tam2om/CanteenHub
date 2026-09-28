@@ -568,6 +568,32 @@ describe('Dashboard — selection', () => {
       expect(screen.getByText(/Set for you by an administrator/i)).toBeInTheDocument();
     });
 
+    it('is warned that nothing is prepared unless they submit for the day', async () => {
+      stubFetch({ [ME]: ok(SESSION_USER), [TODAY]: ok(healthyPayload()) });
+      renderWithProviders(<EmployeeDashboard />);
+
+      expect(await screen.findByText(/prepared only if you submit for this date/i)).toBeInTheDocument();
+      // And NOT told the Option 1 rule, which does not apply to them.
+      expect(screen.queryByText(/if you submit nothing at all/i)).not.toBeInTheDocument();
+    });
+
+    it('stops being warned once they have confirmed the day', async () => {
+      stubFetch({
+        [ME]: ok(SESSION_USER),
+        [TODAY]: ok({
+          ...healthyPayload(),
+          selection: {
+            id: 1, meal_date: '2027-03-07', choice: 'healthy', pickup_location: 'amco_canteen',
+            source: 'employee', selected_at: '', updated_at: '',
+          },
+        }),
+      });
+      renderWithProviders(<EmployeeDashboard />);
+
+      expect(await screen.findByText(/choice for .* is saved/i)).toBeInTheDocument();
+      expect(screen.queryByText(/prepared only if you submit/i)).not.toBeInTheDocument();
+    });
+
     it('still chooses where to collect it, and submits that', async () => {
       const user = userEvent.setup();
       const fetchSpy = stubFetch({
