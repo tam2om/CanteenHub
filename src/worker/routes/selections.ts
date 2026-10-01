@@ -21,7 +21,7 @@ import { getEligibilityWithNextDate } from '../services/eligibility.service.js';
 import {
   getCurrentBusinessDate,
   getSelectableMealDate,
-  isCutoffPassed,
+  getOrderingWindow,
 } from '../services/settings.service.js';
 import { getMenuDayByDate } from '../repositories/menu.repo.js';
 import { getEmployeeById } from '../db/employees.js';
@@ -128,33 +128,40 @@ app.post('/me', requireAuth, async (c) => {
     return c.json({ success: false, error: 'Menu is not yet published' }, 400);
   }
   
-  // Check the deadline. Lunch is ordered a day ahead, so the window for a meal
-  // closes at the cutoff on the day BEFORE it. Two different situations end up
-  // here, and they deserve different explanations:
+  // Check the ordering window. Lunch is ordered a day ahead, and only on that
+  // day: the window for a meal opens at midnight the day BEFORE it and closes
+  // at the cutoff that same day. Three situations end up refused here, and
+  // they deserve different explanations:
   //
   //   - the meal is today or earlier: it was never orderable today at all, so
   //     "the cutoff has passed" would read as a near miss that it is not;
-  //   - the meal is in the future, but its deadline (the cutoff yesterday-of-
-  //     it, i.e. today) has just gone by: that IS the ordinary cutoff case.
-  const cutoffPassed = await isCutoffPassed(db, meal_date);
-  if (cutoffPassed) {
+  //   - the meal is in the future, but its window closed at today's cutoff:
+  //     that IS the ordinary cutoff case;
+  //   - the meal is further out and its window has not opened yet.
+  const orderingWindow = await getOrderingWindow(db, meal_date);
+  if (orderingWindow.state !== 'open') {
     const [today, selectable] = await Promise.all([
       getCurrentBusinessDate(db),
       getSelectableMealDate(db),
     ]);
+    let error: string;
+    if (orderingWindow.state === 'not_open') {
+      error = `Ordering for ${meal_date} opens at 12:00 AM on ${orderingWindow.orderDate} and closes at ${orderingWindow.cutoffTime} that day.`;
+    } else if (meal_date <= today) {
+      error = `Lunch is chosen a day ahead. ${meal_date} can no longer be ordered; the next date you can choose is ${selectable}.`;
+    } else {
+      error = `The selection cutoff for ${meal_date} has passed - orders are taken from 12:00 AM until ${orderingWindow.cutoffTime} the day before. The next date you can choose is ${selectable}.`;
+    }
     return c.json(
       {
         success: false,
-        error:
-          meal_date <= today
-            ? `Lunch is chosen a day ahead. ${meal_date} can no longer be ordered; the next date you can choose is ${selectable}.`
-            : `The selection cutoff for ${meal_date} has passed - orders close at the cutoff time the day before. The next date you can choose is ${selectable}.`,
+        error,
         selectableDate: selectable,
       },
       400
     );
   }
-  
+
   try {
     const result = await upsertSelection(
       db,

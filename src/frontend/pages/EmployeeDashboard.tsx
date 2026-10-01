@@ -6,6 +6,8 @@
  * preps for tomorrow - so this screen is always about a future meal. The server
  * decides which one (tomorrow before the cutoff, the day after once it has
  * passed) and the screen names that date everywhere rather than saying "today".
+ * Ordering for a date is open from 12:00 AM the day before it until the cutoff
+ * that day; the server says whether that window is open now.
  *
  * Picking and submitting are separate. Tapping an option (or changing the
  * canteen) only marks it locally; nothing reaches the kitchen until Submit is
@@ -24,7 +26,7 @@ import {
   type SelectionFeedback,
 } from '../components/SelectionConfirmation.js';
 import { ErrorState, LoadingState } from '../components/States.js';
-import { formatBusinessDate } from '../lib/format.js';
+import { formatBusinessDate, formatTimeOfDay } from '../lib/format.js';
 import type { LunchChoice, MealLocation, SelectableLunchChoice } from '../types/index.js';
 import {
   DEFAULT_LUNCH_CHOICE,
@@ -69,6 +71,9 @@ export function EmployeeDashboard() {
     menu,
     selection,
     cutoffPassed,
+    orderingOpen,
+    orderingOpensOn,
+    cutoffTime,
     canSelect,
     choiceLocked = false,
   } = data;
@@ -159,6 +164,9 @@ export function EmployeeDashboard() {
       <EligibilityStatus
         eligibility={eligibility}
         cutoffPassed={cutoffPassed}
+        orderingOpen={orderingOpen}
+        orderingOpensOn={orderingOpensOn}
+        cutoffTime={cutoffTime}
         hasMenu={menu !== null}
       />
 
@@ -233,7 +241,7 @@ export function EmployeeDashboard() {
           {selection && !feedback && !hasUnsentChange && (
             <p className="feedback feedback--muted" role="status">
               Your choice for {formatBusinessDate(mealDate)} is saved.
-              {!cutoffPassed && ' You can change it until the deadline.'}
+              {orderingOpen && ` You can change it until ${formatTimeOfDay(cutoffTime)} today.`}
             </p>
           )}
 

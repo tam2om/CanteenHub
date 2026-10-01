@@ -163,6 +163,43 @@ describe('Admin settings', () => {
       expect(res.status).toBe(400);
     });
 
+    it('the window opens at 12:00 AM on the day before: 00:00 is open', async () => {
+      await putCutoff('10:00', admin.cookie);
+
+      // 21:00 UTC the evening before is exactly midnight in Amman.
+      vi.setSystemTime(new Date(`2027-03-05T21:00:00Z`));
+
+      const res = await select(employee.cookie);
+      expect(res.status).toBe(201);
+    });
+
+    it('two days ahead is not open yet, and says when it opens', async () => {
+      await putCutoff('10:00', admin.cookie);
+
+      // 23:59 in Amman the day before the ordering day: one minute early.
+      vi.setSystemTime(new Date(`2027-03-05T20:59:00Z`));
+
+      const res = await select(employee.cookie);
+      expect(res.status).toBe(400);
+      const body = await readJson(res);
+      expect(body.error).toBe(
+        `Ordering for ${MEAL_DATE} opens at 12:00 AM on ${DEADLINE_DAY} and closes at 10:00 that day.`
+      );
+      expect(await countRows(db, 'SELECT COUNT(*) as n FROM lunch_selections')).toBe(0);
+    });
+
+    it('the window closes exactly at the cutoff minute', async () => {
+      await putCutoff('10:00', admin.cookie);
+
+      vi.setSystemTime(new Date(`${DEADLINE_DAY}T06:59:00Z`)); // 09:59 Amman
+      expect((await select(employee.cookie)).status).toBe(201);
+
+      vi.setSystemTime(new Date(`${DEADLINE_DAY}T07:00:00Z`)); // 10:00 Amman
+      const res = await select(employee.cookie, 'option_2');
+      expect(res.status).toBe(400);
+      expect((await readJson(res)).error).toContain('from 12:00 AM until 10:00 the day before');
+    });
+
     it('the meal date itself is always closed, whatever the setting says', async () => {
       // A cutoff at the very end of the day, and a clock early on the meal
       // date. Under the old same-day rule this was open; the kitchen now needs

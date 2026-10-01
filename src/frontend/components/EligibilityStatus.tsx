@@ -4,18 +4,28 @@
  */
 
 import type { Eligibility } from '../types/index.js';
-import { eligibilityMessage, formatBusinessDate } from '../lib/format.js';
+import { eligibilityMessage, formatBusinessDate, formatTimeOfDay } from '../lib/format.js';
 
 interface Props {
   eligibility: Eligibility;
   cutoffPassed: boolean;
+  orderingOpen: boolean;
+  orderingOpensOn: string;
+  cutoffTime: string;
   hasMenu: boolean;
 }
 
-export function EligibilityStatus({ eligibility, cutoffPassed, hasMenu }: Props) {
+export function EligibilityStatus({
+  eligibility,
+  cutoffPassed,
+  orderingOpen,
+  orderingOpensOn,
+  cutoffTime,
+  hasMenu,
+}: Props) {
   const { eligible, reason, nextEligibleDate } = eligibility;
 
-  const tone = eligible ? (cutoffPassed || !hasMenu ? 'warn' : 'ok') : 'off';
+  const tone = eligible ? (!orderingOpen || !hasMenu ? 'warn' : 'ok') : 'off';
 
   return (
     <section className={`status status--${tone}`} aria-live="polite">
@@ -25,6 +35,20 @@ export function EligibilityStatus({ eligibility, cutoffPassed, hasMenu }: Props)
       </p>
 
       <p className="status__detail">{eligibilityMessage(reason)}</p>
+
+      {eligible && orderingOpen && (
+        <p className="status__detail">
+          Ordering is open until <strong>{formatTimeOfDay(cutoffTime)}</strong> today.
+        </p>
+      )}
+
+      {eligible && !orderingOpen && !cutoffPassed && (
+        <p className="status__detail">
+          Ordering for this date opens at 12:00 AM on{' '}
+          <strong>{formatBusinessDate(orderingOpensOn)}</strong> and closes at{' '}
+          <strong>{formatTimeOfDay(cutoffTime)}</strong> that day.
+        </p>
+      )}
 
       {eligible && cutoffPassed && (
         <p className="status__detail">

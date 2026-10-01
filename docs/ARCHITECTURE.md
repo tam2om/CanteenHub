@@ -1548,9 +1548,11 @@ of why it was built that way. Four rules have since changed:
   report counts how many did not ("Healthy meal not reserved"). The portal
   offers ordinary employees a single Option 2 checkbox under an "Option 1 is the
   default" statement.
-- **Lunch is ordered a day ahead.** The deadline for a meal on date D is the
-  cutoff on D−1, so today's lunch is always closed; the portal offers tomorrow
-  before the cutoff and the day after once it passes. The collection canteen is
+- **Lunch is ordered a day ahead.** Ordering for a meal on date D opens at
+  12:00 AM on D−1 and closes at the cutoff that day; before then the date is
+  not open yet, and today's lunch is always closed. The portal offers tomorrow
+  before the cutoff and, once it passes, the day after, saying it opens at
+  midnight. The collection canteen is
   required on every submission and is never inferred from the employee's usual
   one.
 

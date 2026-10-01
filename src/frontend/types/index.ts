@@ -109,6 +109,14 @@ export interface TodayPayload {
   menu: Menu | null;
   selection: Selection | null;
   cutoffPassed: boolean;
+  /**
+   * Whether ordering for mealDate is open right now. The window runs from
+   * 12:00 AM on orderingOpensOn (the day before the meal) until cutoffTime.
+   */
+  orderingOpen: boolean;
+  orderingOpensOn: string;
+  /** The cutoff as HH:MM in the business timezone. */
+  cutoffTime: string;
   /** This employee is on the healthy meal and does not pick an option. */
   choiceLocked?: boolean;
   canSelect: boolean;

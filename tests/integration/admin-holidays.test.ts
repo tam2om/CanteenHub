@@ -8,7 +8,7 @@
  * only supplies data the rules already understood.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import app from '../../src/worker/index.js';
 import { createTestDb, type TestD1Database } from '../helpers/d1.js';
 import {
@@ -18,6 +18,8 @@ import {
   seedRosterEntry,
   jsonRequest,
   readJson,
+  insideOrderingWindow,
+  extendAllSessions,
   countRows,
   ROLE_ADMIN,
   type SeededEmployee,
@@ -43,6 +45,10 @@ describe('Admin holidays', () => {
     employee = await seedEmployee(db, { amcoId: 'TEST001', rosterType: 'regular' });
     shiftWorker = await seedEmployee(db, { amcoId: 'TEST010', rosterType: 'shift' });
     await seedMenuDay(db, HOLIDAY_DATE, 'published');
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   const addHoliday = (date: unknown, name: unknown, cookie: string) =>
@@ -206,6 +212,9 @@ describe('Admin holidays', () => {
     });
 
     it('the employee can select again once the holiday is removed', async () => {
+      // Orders are only taken on the day before the meal.
+      vi.setSystemTime(insideOrderingWindow(HOLIDAY_DATE));
+      await extendAllSessions(db);
       await addHoliday(HOLIDAY_DATE, 'Independence Day', admin.cookie);
       await removeHoliday(HOLIDAY_DATE, admin.cookie);
 

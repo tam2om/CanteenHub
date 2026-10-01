@@ -23,7 +23,7 @@ import { toPublicEmployee } from '../lib/employeeView.js';
 import {
   getCurrentBusinessDate,
   getSelectableMealDate,
-  isCutoffPassed,
+  getOrderingWindow,
 } from '../services/settings.service.js';
 import { getEligibilityWithNextDate } from '../services/eligibility.service.js';
 import { getPublishedMenuByDate } from '../repositories/menu.repo.js';
@@ -51,7 +51,7 @@ const DEFAULT_HISTORY_LIMIT = 30;
  *
  * THE DEFAULT DAY IS NOT TODAY. Lunch is ordered a day ahead, so the dashboard
  * opens on the next date that can still be ordered - tomorrow before the
- * cutoff, the day after once it has passed. `businessDate` is still returned
+ * cutoff, the day after once it has passed (whose window opens at midnight). `businessDate` is still returned
  * alongside it, because the screen has to be able to say what today is.
  *
  * `?date=YYYY-MM-DD` is accepted for viewing another day.
@@ -85,7 +85,10 @@ app.get('/today', async (c) => {
   // The cutoff is configuration, evaluated here in the business timezone. The
   // client is told the outcome so it never computes a cutoff itself; the server
   // still re-checks on every write, and remains the authority.
-  const cutoffPassed = await isCutoffPassed(db, mealDate);
+  // The window runs from midnight to the cutoff on the day before the meal.
+  const orderingWindow = await getOrderingWindow(db, mealDate);
+  const cutoffPassed = orderingWindow.state === 'closed';
+  const orderingOpen = orderingWindow.state === 'open';
 
   return c.json({
     success: true,
@@ -100,6 +103,14 @@ app.get('/today', async (c) => {
       selection,
       cutoffPassed,
       /**
+       * Whether the ordering window for mealDate is open right now. It runs
+       * from 12:00 AM on orderingOpensOn until cutoffTime that same day;
+       * before then the date is not open yet, after it cutoffPassed is true.
+       */
+      orderingOpen,
+      orderingOpensOn: orderingWindow.orderDate,
+      cutoffTime: orderingWindow.cutoffTime,
+      /**
        * This employee is on the healthy meal: the option is decided for them
        * and only an administrator can change it. They still choose where to
        * collect it, so the screen stays usable - it just does not offer the
@@ -107,7 +118,7 @@ app.get('/today', async (c) => {
        */
       choiceLocked: employee.meal_preference === 'healthy',
       // A single flag the UI can render from, rather than re-deriving the rule.
-      canSelect: eligibility.eligible && !cutoffPassed && menu !== null,
+      canSelect: eligibility.eligible && orderingOpen && menu !== null,
     },
   });
 });

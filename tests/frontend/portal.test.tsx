@@ -490,7 +490,7 @@ describe('Dashboard — selection', () => {
   it('19. when the cutoff has already passed the checkbox is disabled', async () => {
     stubFetch({
       [ME]: ok(SESSION_USER),
-      [TODAY]: ok(todayPayload({ cutoffPassed: true, canSelect: false })),
+      [TODAY]: ok(todayPayload({ cutoffPassed: true, orderingOpen: false, canSelect: false })),
     });
     renderWithProviders(<EmployeeDashboard />);
 
@@ -500,6 +500,38 @@ describe('Dashboard — selection', () => {
         'The selection deadline for this date has passed, so your choice can no longer be changed.'
       )
     ).toBeInTheDocument();
+  });
+
+  it('says until when ordering is open today', async () => {
+    stubFetch({
+      [ME]: ok(SESSION_USER),
+      [TODAY]: ok(todayPayload({ cutoffTime: '10:00' })),
+    });
+    renderWithProviders(<EmployeeDashboard />);
+
+    expect(await screen.findByText(/Ordering is open until/)).toHaveTextContent(
+      'Ordering is open until 10:00 AM today.'
+    );
+  });
+
+  it('says when ordering opens for a date that is not open yet', async () => {
+    stubFetch({
+      [ME]: ok(SESSION_USER),
+      [TODAY]: ok(
+        todayPayload({
+          orderingOpen: false,
+          orderingOpensOn: '2027-03-06',
+          cutoffTime: '10:00',
+          canSelect: false,
+        })
+      ),
+    });
+    renderWithProviders(<EmployeeDashboard />);
+
+    expect(await option2Box()).toBeDisabled();
+    expect(screen.getByText(/Ordering for this date opens at/)).toHaveTextContent(
+      'Ordering for this date opens at 12:00 AM on Saturday, 6 March 2027 and closes at 10:00 AM that day.'
+    );
   });
 
   it('20. an eligibility rejection from the server is shown verbatim', async () => {
