@@ -78,6 +78,9 @@ export function EmployeeDashboard() {
     choiceLocked = false,
   } = data;
 
+  // The window for mealDate opens at midnight; it is neither open nor past.
+  const notOpenYet = !orderingOpen && !cutoffPassed;
+
   const optionNames: Partial<Record<LunchChoice, string>> = {
     option_1: menu?.options.find((o) => o.option_number === 1)?.name,
     option_2: menu?.options.find((o) => o.option_number === 2)?.name,
@@ -161,96 +164,114 @@ export function EmployeeDashboard() {
         </div>
       </section>
 
-      <EligibilityStatus
-        eligibility={eligibility}
-        cutoffPassed={cutoffPassed}
-        orderingOpen={orderingOpen}
-        orderingOpensOn={orderingOpensOn}
-        cutoffTime={cutoffTime}
-        hasMenu={menu !== null}
-      />
-
-      <MenuCard menu={menu} />
-
-      {eligibility.eligible && menu && (
-        <section className="card">
-          <MealSelection
-            current={markedChoice}
-            saved={savedChoice}
-            disabled={!canSelect || select.isPending}
-            pending={pending}
-            optionNames={optionNames}
-            onSelect={handleSelect}
-            locked={choiceLocked}
+      {/* Between the cut-off and midnight nothing can be ordered. The next
+          date's menu stays hidden until its window opens, so nobody reads it
+          as something they can choose now. */}
+      {notOpenYet ? (
+        <section className="status status--warn" aria-live="polite">
+          <p className="status__headline">
+            <span className="status__dot" aria-hidden="true" />
+            Ordering is closed for now
+          </p>
+          <p className="status__detail">
+            To choose your lunch for <strong>{formatBusinessDate(mealDate)}</strong>, please log in
+            from <strong>12:00 AM on {formatBusinessDate(orderingOpensOn)}</strong> until{' '}
+            <strong>{formatTimeOfDay(cutoffTime)}</strong> that day.
+          </p>
+        </section>
+      ) : (
+        <>
+          <EligibilityStatus
+            eligibility={eligibility}
+            cutoffPassed={cutoffPassed}
+            orderingOpen={orderingOpen}
+            cutoffTime={cutoffTime}
+            hasMenu={menu !== null}
           />
 
-          {/* Where to collect it. Required, and deliberately empty until the
-              employee picks: this is the one thing the kitchen cannot work out
-              for itself. Like the meal, a change here is only marked until
-              Submit is pressed. */}
-          <div className="field field--location">
-            <label className="field__label" htmlFor="pickup-location">
-              Collect from
-            </label>
-            <select
-              id="pickup-location"
-              className="field__input"
-              value={location ?? ''}
-              required
-              disabled={!canSelect || select.isPending}
-              onChange={(e) => {
-                const value = e.target.value;
-                setChosenLocation(value === '' ? null : (value as MealLocation));
-                setFeedback(null);
-              }}
-            >
-              <option value="">Choose a canteen…</option>
-              {MEAL_LOCATIONS.map((value) => (
-                <option key={value} value={value}>
-                  {MEAL_LOCATION_LABELS[value]}
-                </option>
-              ))}
-            </select>
-          </div>
+          <MenuCard menu={menu} />
 
-          <div className="actions">
-            <button
-              type="button"
-              className="button button--primary"
-              disabled={!canSelect || select.isPending || !hasUnsentChange}
-              onClick={handleSubmit}
-            >
-              {select.isPending ? 'Submitting…' : 'Submit my choice'}
-            </button>
-          </div>
+          {eligibility.eligible && menu && (
+            <section className="card">
+              <MealSelection
+                current={markedChoice}
+                saved={savedChoice}
+                disabled={!canSelect || select.isPending}
+                pending={pending}
+                optionNames={optionNames}
+                onSelect={handleSelect}
+                locked={choiceLocked}
+              />
 
-          {canSelect && location === null && !select.isPending && (
-            <p className="feedback feedback--warn" role="status">
-              Choose where you will collect this meal before submitting.
-            </p>
+              {/* Where to collect it. Required, and deliberately empty until the
+                  employee picks: this is the one thing the kitchen cannot work out
+                  for itself. Like the meal, a change here is only marked until
+                  Submit is pressed. */}
+              <div className="field field--location">
+                <label className="field__label" htmlFor="pickup-location">
+                  Collect from
+                </label>
+                <select
+                  id="pickup-location"
+                  className="field__input"
+                  value={location ?? ''}
+                  required
+                  disabled={!canSelect || select.isPending}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setChosenLocation(value === '' ? null : (value as MealLocation));
+                    setFeedback(null);
+                  }}
+                >
+                  <option value="">Choose a canteen…</option>
+                  {MEAL_LOCATIONS.map((value) => (
+                    <option key={value} value={value}>
+                      {MEAL_LOCATION_LABELS[value]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="actions">
+                <button
+                  type="button"
+                  className="button button--primary"
+                  disabled={!canSelect || select.isPending || !hasUnsentChange}
+                  onClick={handleSubmit}
+                >
+                  {select.isPending ? 'Submitting…' : 'Submit my choice'}
+                </button>
+              </div>
+
+              {canSelect && location === null && !select.isPending && (
+                <p className="feedback feedback--warn" role="status">
+                  Choose where you will collect this meal before submitting.
+                </p>
+              )}
+
+              <SelectionConfirmation feedback={feedback} />
+
+              {hasUnsentChange && !select.isPending && (
+                <p className="feedback feedback--warn" role="status">
+                  Not submitted yet. Press &ldquo;Submit my choice&rdquo; to send it to the kitchen.
+                </p>
+              )}
+
+              {selection && !feedback && !hasUnsentChange && (
+                <p className="feedback feedback--muted" role="status">
+                  Your choice for {formatBusinessDate(mealDate)} is saved.
+                  {orderingOpen && ` You can change it until ${formatTimeOfDay(cutoffTime)} today.`}
+                </p>
+              )}
+
+              {cutoffPassed && (
+                <p className="feedback feedback--muted">
+                  The deadline has passed for this date.
+                </p>
+              )}
+            </section>
           )}
-
-          <SelectionConfirmation feedback={feedback} />
-
-          {hasUnsentChange && !select.isPending && (
-            <p className="feedback feedback--warn" role="status">
-              Not submitted yet. Press &ldquo;Submit my choice&rdquo; to send it to the kitchen.
-            </p>
-          )}
-
-          {selection && !feedback && !hasUnsentChange && (
-            <p className="feedback feedback--muted" role="status">
-              Your choice for {formatBusinessDate(mealDate)} is saved.
-              {orderingOpen && ` You can change it until ${formatTimeOfDay(cutoffTime)} today.`}
-            </p>
-          )}
-
-          {cutoffPassed && (
-            <p className="feedback feedback--muted">
-              The deadline has passed for this date.
-            </p>
-          )}
-        </section>
+        </>
       )}
     </main>
   );

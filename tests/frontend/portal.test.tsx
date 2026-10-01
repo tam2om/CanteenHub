@@ -514,7 +514,7 @@ describe('Dashboard — selection', () => {
     );
   });
 
-  it('says when ordering opens for a date that is not open yet', async () => {
+  it('after the cut-off, hides the next menu and says when to log in to order it', async () => {
     stubFetch({
       [ME]: ok(SESSION_USER),
       [TODAY]: ok(
@@ -528,10 +528,14 @@ describe('Dashboard — selection', () => {
     });
     renderWithProviders(<EmployeeDashboard />);
 
-    expect(await option2Box()).toBeDisabled();
-    expect(screen.getByText(/Ordering for this date opens at/)).toHaveTextContent(
-      'Ordering for this date opens at 12:00 AM on Saturday, 6 March 2027 and closes at 10:00 AM that day.'
+    expect(await screen.findByText('Ordering is closed for now')).toBeInTheDocument();
+    expect(screen.getByText(/To choose your lunch for/)).toHaveTextContent(
+      'To choose your lunch for Sunday, 7 March 2027, please log in from 12:00 AM on Saturday, 6 March 2027 until 10:00 AM that day.'
     );
+    // Nothing that reads as choosable now: no menu, no option, no submit.
+    expect(screen.queryByText('Test Dish Alpha')).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Submit my choice' })).not.toBeInTheDocument();
   });
 
   it('20. an eligibility rejection from the server is shown verbatim', async () => {
