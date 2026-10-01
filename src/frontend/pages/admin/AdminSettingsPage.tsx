@@ -95,8 +95,9 @@ function CutoffSection() {
             {timezoneSetting && ` (${unquote(timezoneSetting.value)})`}
           </p>
           <p className="panel__note">
-            Employees can create or change a selection until this time on the meal date. The time is
-            interpreted in the company timezone by the server.
+            Employees order a day ahead: for each meal date, choices open at 12:00 AM the day before
+            and close at this time that day. The time is interpreted in the company timezone by the
+            server.
           </p>
 
           <form onSubmit={handleSubmit} noValidate className="setting__form">

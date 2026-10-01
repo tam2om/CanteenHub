@@ -117,46 +117,76 @@ export async function getCutoffMinutes(db: D1Database): Promise<number> {
 }
 
 /**
- * Has the selection deadline passed for the given meal date?
+ * The ordering window for a meal date, and where "now" sits in it.
  *
- * LUNCH IS ORDERED A DAY AHEAD. The kitchen buys and preps for tomorrow, so the
- * deadline for a meal on date D is the cutoff time on D MINUS ONE DAY, not on D
- * itself. Today's lunch is therefore always closed: its deadline was yesterday.
+ * LUNCH IS ORDERED A DAY AHEAD. The kitchen buys and preps for tomorrow, so a
+ * meal on date D is ordered on D MINUS ONE DAY, and only on that day: the
+ * window opens at 12:00 AM (midnight) and closes at the configured cutoff time.
+ * Before that midnight the date is not open yet; from the cutoff on it is
+ * closed. Today's lunch is therefore always closed: its window was yesterday.
  *
  * Both "what day is it now" and "what time is it now" are resolved through the
  * configured IANA timezone. Nothing here uses a fixed UTC offset.
  */
-export async function isCutoffPassed(db: D1Database, mealDate: BusinessDate): Promise<boolean> {
+export type OrderingWindowState = 'not_open' | 'open' | 'closed';
+
+export interface OrderingWindow {
+  state: OrderingWindowState;
+  /** The business date the window runs on (the day before the meal). */
+  orderDate: BusinessDate;
+  /** The cutoff as HH:MM, in the business timezone. The window closes then. */
+  cutoffTime: string;
+}
+
+export async function getOrderingWindow(
+  db: D1Database,
+  mealDate: BusinessDate,
+  now: Date = new Date()
+): Promise<OrderingWindow> {
   const timezone = await getTimezone(db);
   const cutoffMinutes = await getCutoffMinutes(db);
-  const now = new Date();
 
   const today = getBusinessDate(timezone, now);
-  // The day the ordering window for this meal closes.
-  const deadlineDate = addBusinessDays(mealDate, -1);
-  const comparison = compareBusinessDates(deadlineDate, today);
+  const orderDate = addBusinessDays(mealDate, -1);
+  const comparison = compareBusinessDates(orderDate, today);
 
-  // The deadline day is already behind us.
+  let state: OrderingWindowState;
   if (comparison < 0) {
-    return true;
+    // The ordering day is already behind us.
+    state = 'closed';
+  } else if (comparison > 0) {
+    // The ordering day has not arrived; it opens at midnight that day.
+    state = 'not_open';
+  } else {
+    // Ordering day: open from midnight until the cutoff on the wall clock.
+    state = getBusinessTimeMinutes(timezone, now) < cutoffMinutes ? 'open' : 'closed';
   }
 
-  // The deadline day has not arrived; the window is open.
-  if (comparison > 0) {
-    return false;
-  }
+  return { state, orderDate, cutoffTime: formatMinutesAsTime(cutoffMinutes) };
+}
 
-  // Deadline day: compare against the wall clock in the business timezone.
-  return getBusinessTimeMinutes(timezone, now) >= cutoffMinutes;
+/**
+ * Has the selection deadline passed for the given meal date? True from the
+ * cutoff on the day before the meal onwards. A date whose window has not opened
+ * yet is NOT past its deadline - see getOrderingWindow.
+ */
+export async function isCutoffPassed(db: D1Database, mealDate: BusinessDate): Promise<boolean> {
+  return (await getOrderingWindow(db, mealDate)).state === 'closed';
+}
+
+function formatMinutesAsTime(minutes: number): string {
+  const hours = String(Math.floor(minutes / 60)).padStart(2, '0');
+  const mins = String(minutes % 60).padStart(2, '0');
+  return `${hours}:${mins}`;
 }
 
 /**
  * The meal date an employee is choosing for right now.
  *
  * Before the cutoff today, tomorrow's lunch is open. Once it passes, tomorrow
- * is settled and the next thing anyone can order is the day after - so an
- * employee is never shown a day they cannot act on, and there is no dead window
- * in which the portal has nothing to offer.
+ * is settled and the next date is the day after, whose window opens at
+ * midnight tonight. Between the cutoff and midnight nothing can be ordered, so
+ * the portal shows that next date and says when it opens.
  *
  * Whether the employee is ELIGIBLE on that date, and whether a menu is
  * published for it, are separate questions answered elsewhere. This one only

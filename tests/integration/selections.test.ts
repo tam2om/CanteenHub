@@ -6,7 +6,7 @@
  * the choice an employee already has must write nothing at all.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import app from '../../src/worker/index.js';
 import { createTestDb, type TestD1Database } from '../helpers/d1.js';
 import {
@@ -18,14 +18,16 @@ import {
   countRows,
   jsonRequest,
   readJson,
+  insideOrderingWindow,
+  extendAllSessions,
   ROLE_ADMIN,
   type SeededEmployee,
 } from '../helpers/fixtures.js';
 
 const BASE = 'http://localhost';
 
-// A future Sunday (a configured working day) with a published menu, so the
-// cutoff is definitionally not passed and Regular employees are eligible.
+// A Sunday (a configured working day) with a published menu, so Regular
+// employees are eligible. The clock is held inside its ordering window.
 const MEAL_DATE = '2027-03-07';
 
 describe('Selection API', () => {
@@ -35,8 +37,11 @@ describe('Selection API', () => {
   let regular: SeededEmployee;
   let shiftWorker: SeededEmployee;
   let ammanHq: SeededEmployee;
-
   beforeEach(async () => {
+
+    // Orders for MEAL_DATE are only taken on the day before it, from midnight
+    // until the cutoff.
+    vi.setSystemTime(insideOrderingWindow(MEAL_DATE));
     db = createTestDb();
     env = testEnv(db);
     await setSetting(db, 'timezone', '"Asia/Amman"');
@@ -48,6 +53,10 @@ describe('Selection API', () => {
     ammanHq = await seedEmployee(db, { amcoId: 'TEST020', rosterType: 'amman_hq' });
 
     await seedMenuDay(db, MEAL_DATE, 'published');
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   /**
@@ -389,6 +398,12 @@ describe('Selection API', () => {
   });
 
   describe('lunch is chosen a day ahead', () => {
+    // Today is MEAL_DATE (a working Sunday) and tomorrow's window is open.
+    beforeEach(async () => {
+      vi.setSystemTime(insideOrderingWindow('2027-03-08'));
+      await extendAllSessions(db);
+    });
+
     /** What the SERVER says today and the next orderable date are. */
     const dates = async () => {
       const res = await app.request(
@@ -401,7 +416,7 @@ describe('Selection API', () => {
 
     it('refuses today’s lunch, whatever the time of day', async () => {
       const { businessDate } = await dates();
-      await seedMenuDay(db, businessDate, 'published');
+      expect(businessDate).toBe(MEAL_DATE); // menu already seeded
 
       const res = await select(regular, 'option_1', businessDate);
 

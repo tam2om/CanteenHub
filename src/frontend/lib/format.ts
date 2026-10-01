@@ -25,6 +25,15 @@ export function formatBusinessDate(date: string): string {
   return `${WEEKDAYS[d.getUTCDay()]}, ${day} ${MONTHS[month - 1]} ${year}`;
 }
 
+/** Format a server-supplied HH:MM (24-hour) time as e.g. "10:00 AM". */
+export function formatTimeOfDay(time: string): string {
+  const [hours, minutes] = time.split(':').map(Number);
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return time;
+  const suffix = hours < 12 ? 'AM' : 'PM';
+  const hour12 = hours % 12 === 0 ? 12 : hours % 12;
+  return `${hour12}:${String(minutes).padStart(2, '0')} ${suffix}`;
+}
+
 export function formatShortDate(date: string): string {
   const [year, month, day] = date.split('-').map(Number);
   if (!year || !month || !day) return date;

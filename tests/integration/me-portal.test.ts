@@ -19,6 +19,7 @@ import {
   extendAllSessions,
   jsonRequest,
   readJson,
+  insideOrderingWindow,
   ROLE_ADMIN,
   type SeededEmployee,
 } from '../helpers/fixtures.js';
@@ -52,6 +53,10 @@ describe('Employee portal API (/api/me)', () => {
     ammanHq = await seedEmployee(db, { amcoId: 'TEST020', rosterType: 'amman_hq' });
 
     await extendAllSessions(db);
+
+    // Orders for MEAL_DATE are only taken on the day before it, from midnight
+    // until the cutoff. Tests about the clock set their own time.
+    vi.setSystemTime(insideOrderingWindow(MEAL_DATE));
   });
 
   afterEach(() => {
@@ -349,6 +354,39 @@ describe('Employee portal API (/api/me)', () => {
       expect((await readJson(await today(employee.cookie, MEAL_DATE))).data.cutoffPassed).toBe(false);
     });
 
+    it('reports the window as open from 12:00 AM until the cutoff on the day before', async () => {
+      await setSetting(db, 'lunch_cutoff_time', '"11:00"', 'time');
+      vi.setSystemTime(new Date('2027-03-06T05:00:00Z')); // 08:00 Amman, day before
+
+      const body = await readJson(await today(employee.cookie, MEAL_DATE));
+      expect(body.data.orderingOpen).toBe(true);
+      expect(body.data.orderingOpensOn).toBe('2027-03-06');
+      expect(body.data.cutoffTime).toBe('11:00');
+      expect(body.data.cutoffPassed).toBe(false);
+      expect(body.data.canSelect).toBe(true);
+    });
+
+    it('a date whose window has not opened yet cannot be selected, and is not past its cutoff', async () => {
+      await setSetting(db, 'lunch_cutoff_time', '"11:00"', 'time');
+      vi.setSystemTime(new Date('2027-03-05T05:00:00Z')); // two days before
+
+      const body = await readJson(await today(employee.cookie, MEAL_DATE));
+      expect(body.data.orderingOpen).toBe(false);
+      expect(body.data.orderingOpensOn).toBe('2027-03-06');
+      expect(body.data.cutoffPassed).toBe(false);
+      expect(body.data.canSelect).toBe(false);
+    });
+
+    it('after the cutoff, the next date offered opens at midnight tonight', async () => {
+      await setSetting(db, 'lunch_cutoff_time', '"10:00"', 'time');
+      vi.setSystemTime(new Date('2027-03-15T09:00:00Z')); // 12:00 Amman
+
+      const body = await readJson(await today(employee.cookie));
+      expect(body.data.mealDate).toBe('2027-03-17');
+      expect(body.data.orderingOpen).toBe(false);
+      expect(body.data.orderingOpensOn).toBe('2027-03-16');
+    });
+
     it('today’s own lunch is always past its deadline', async () => {
       await setSetting(db, 'lunch_cutoff_time', '"23:59"', 'time');
       // Early morning ON the meal date, with a cutoff that has not passed
@@ -418,6 +456,8 @@ describe('Employee portal API (/api/me)', () => {
     it('supports limit and offset, and caps an excessive limit', async () => {
       await select(employee.cookie, 'option_1');
       await select(employee.cookie, 'option_2');
+      // The next day's window opens at midnight after MEAL_DATE's closes.
+      vi.setSystemTime(insideOrderingWindow('2027-03-08'));
       await select(employee.cookie, 'option_1', '2027-03-08');
 
       const firstPage = await readJson(await history(employee.cookie, '?limit=2'));

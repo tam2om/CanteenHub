@@ -185,6 +185,17 @@ export function jsonRequest(body: unknown, cookie?: string): RequestInit {
  * A future date that is comfortably beyond the old hard-coded 365-day horizon,
  * used to prove the next-eligible-date search is data-driven rather than capped.
  */
+/**
+ * An instant inside the ordering window for a meal date: 05:00 in Amman on the
+ * day before it, after the window opens at midnight and before the default
+ * 10:00 cutoff. Pass it to vi.setSystemTime in tests that place orders.
+ */
+export function insideOrderingWindow(mealDate: string): Date {
+  const [year, month, day] = mealDate.split('-').map(Number);
+  // 02:00 UTC on the day before is 05:00 in Amman (UTC+3).
+  return new Date(Date.UTC(year, month - 1, day - 1, 2, 0, 0));
+}
+
 export function farFutureSunday(): string {
   // 2028-09-03 is a Sunday, ~730 days past 2026-09-09.
   return '2028-09-03';

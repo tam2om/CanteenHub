@@ -7,7 +7,7 @@
  * checking the real XLSX writer. Every name and password here is invented.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import app from '../../src/worker/index.js';
 import { createTestDb, type TestD1Database } from '../helpers/d1.js';
 import { buildEmployeeWorkbook } from '../helpers/xlsxFixture.js';
@@ -19,6 +19,7 @@ import {
   countRows,
   readJson,
   setSetting,
+  insideOrderingWindow,
   ROLE_ADMIN,
   ROLE_EMPLOYEE,
   ROLE_SUPER_ADMIN,
@@ -35,6 +36,8 @@ describe('Meal collection points', () => {
   let employee: SeededEmployee;
 
   beforeEach(async () => {
+    // Orders for DATE are only taken on the day before it.
+    vi.setSystemTime(insideOrderingWindow(DATE));
     db = createTestDb();
     env = testEnv(db);
     admin = await seedEmployee(db, { amcoId: 'TEST600', roleId: ROLE_ADMIN });
@@ -49,6 +52,10 @@ describe('Meal collection points', () => {
       .bind(dayId, 'Test Main Two')
       .run();
     await setSetting(db, 'lunch_cutoff_time', '"23:59"');
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   const select = (cookie: string, body: Record<string, unknown>) =>

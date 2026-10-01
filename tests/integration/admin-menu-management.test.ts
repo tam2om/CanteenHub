@@ -6,7 +6,7 @@
  * invented; no real menu content appears.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import app from '../../src/worker/index.js';
 import { createTestDb, type TestD1Database } from '../helpers/d1.js';
 import { buildMenuWorkbook, menuRow } from '../helpers/xlsxFixture.js';
@@ -18,6 +18,8 @@ import {
   countRows,
   jsonRequest,
   readJson,
+  insideOrderingWindow,
+  extendAllSessions,
   ROLE_ADMIN,
   ROLE_SUPER_ADMIN,
   type SeededEmployee,
@@ -38,6 +40,10 @@ describe('Admin menu management', () => {
     admin = await seedEmployee(db, { amcoId: 'TEST900', roleId: ROLE_ADMIN });
     superAdmin = await seedEmployee(db, { amcoId: 'TEST901', roleId: ROLE_SUPER_ADMIN });
     employee = await seedEmployee(db, { amcoId: 'TEST100', rosterType: 'regular' });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   const get = (path: string, cookie = admin.cookie) =>
@@ -474,6 +480,9 @@ describe('Admin menu management', () => {
     });
 
     it('a PUBLISHED menu is visible and selectable', async () => {
+      // Orders are only taken on the day before the meal.
+      vi.setSystemTime(insideOrderingWindow('2027-03-01'));
+      await extendAllSessions(db);
       const id = await seedFullMenu('2027-03-01', 'draft');
       await put(`/api/menu/${id}/publish`);
 
@@ -494,6 +503,9 @@ describe('Admin menu management', () => {
     });
 
     it('a published menu stays visible and selectable through EVERY edit', async () => {
+      // Orders are only taken on the day before the meal.
+      vi.setSystemTime(insideOrderingWindow('2027-03-01'));
+      await extendAllSessions(db);
       const id = await seedFullMenu('2027-03-01', 'published');
 
       // Ensuring the day exists, then editing both options and a component.
@@ -610,6 +622,9 @@ describe('Admin menu management', () => {
 
   describe('import to employee workflow', () => {
     it('import -> published -> correct in place -> employee can select', async () => {
+      // Orders are only taken on the day before the meal.
+      vi.setSystemTime(insideOrderingWindow('2027-03-01'));
+      await extendAllSessions(db);
       // 1. Import a lunch menu. Committing publishes it.
       const form = new FormData();
       form.set('import_type', 'menu');
