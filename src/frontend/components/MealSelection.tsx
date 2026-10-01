@@ -1,30 +1,27 @@
 /**
- * The meal choices.
+ * The meal choice.
  *
- * Rendered as a radio fieldset rather than divs so keyboard navigation and
- * screen-reader grouping come from the platform. Selection state is conveyed by
- * a checkmark and a word as well as colour, since colour alone would fail for a
- * colour-blind employee reading the single most important piece of information
- * on the screen.
+ * OPTION 1 IS THE DEFAULT, AND THE SCREEN SAYS SO FIRST. Everyone entitled to
+ * lunch is served Option 1 unless they act; the only thing an ordinary employee
+ * can opt into is Option 2. So the choice is a single checkbox - "I want
+ * Option 2" - rather than two equal radio buttons that suggest nothing happens
+ * until one is picked.
  *
- * TWO CHOICES, not three. "No preference" is gone: the kitchen still had to
- * cook something for it, so it was never a preference, only an unanswered
- * question. An employee who chooses nothing is served Option 1, which the
- * screen says out loud rather than leaving them to find out at the counter.
+ * A healthy-meal employee does not choose between the options at all. They
+ * RESERVE the healthy meal by submitting for the date; one who does not is
+ * served Option 1. Their statement says exactly that, because the cost of
+ * missing it is the wrong lunch.
  *
- * PICKING IS NOT SUBMITTING. Tapping an option only marks it; the dashboard's
- * Submit button is what sends it. So the tick has to say WHICH of the two states
- * it means - "Selected" for what the kitchen currently has, "Not submitted yet"
- * for a pick still waiting - or an employee would leave the screen believing an
- * unsent choice was safely recorded.
+ * PICKING IS NOT SUBMITTING. Ticking the box only marks it; the dashboard's
+ * Submit button is what sends it, and an unsent tick is shown as unsent so
+ * nobody leaves believing an unsubmitted change was recorded.
  */
 
 import type { LunchChoice, SelectableLunchChoice } from '../types/index.js';
-import { SELECTABLE_LUNCH_CHOICES } from '../types/index.js';
 import { CHOICE_LABELS } from '../lib/format.js';
 
 interface Props {
-  /** What is marked on screen: the unsent pick if there is one, else the saved choice. */
+  /** What is marked on screen: the unsent change if there is one, else the saved choice. */
   current: LunchChoice | null;
   /** What the server currently holds. Used only to tell saved from unsent. */
   saved: LunchChoice | null;
@@ -32,11 +29,7 @@ interface Props {
   pending: LunchChoice | null;
   optionNames: Partial<Record<LunchChoice, string>>;
   onSelect: (choice: SelectableLunchChoice) => void;
-  /**
-   * This employee is on the healthy meal. The options are not rendered at all
-   * rather than rendered disabled: two greyed-out cards invite an employee to
-   * keep tapping something that will never respond.
-   */
+  /** This employee is on the healthy meal: no options, only a reservation. */
   locked?: boolean;
 }
 
@@ -49,62 +42,66 @@ export function MealSelection({
   onSelect,
   locked = false,
 }: Props) {
+  const option1 = optionNames.option_1;
+
   if (locked) {
+    const reserved = saved === 'healthy';
     return (
       <section className="choices" aria-label="Your meal">
         <p className="choices__legend">Your meal</p>
-        <div className="choice choice--selected choice--fixed">
+
+        <p className="meal-rule" role="note">
+          You are on the <strong>healthy meal</strong>. To reserve it for this date, choose where
+          you will collect it and press <strong>Submit</strong>. If you do not submit, you will be
+          served <strong>Option 1</strong>
+          {option1 ? ` (${option1})` : ''} instead.
+        </p>
+
+        <div className={`choice choice--selected choice--fixed ${reserved ? '' : 'choice--unsent'}`}>
           <span className="choice__body">
             <span className="choice__label">{CHOICE_LABELS.healthy}</span>
             <span className="choice__dish">
-              Set for you by an administrator. The menu options do not apply.
+              {reserved ? 'Reserved for this date.' : 'Not reserved yet.'}
             </span>
           </span>
           <span className="choice__state" aria-hidden="true">
-            ✓
+            {reserved ? '✓' : ''}
           </span>
         </div>
       </section>
     );
   }
 
+  const wantsOption2 = current === 'option_2';
+  // Ticked or unticked, but not what the server holds.
+  const isUnsent = saved !== null ? current !== saved : wantsOption2;
+
   return (
-    <fieldset className="choices" disabled={disabled}>
-      <legend className="choices__legend">Choose your lunch</legend>
+    <section className="choices" aria-label="Your meal">
+      <p className="choices__legend">Your lunch</p>
 
-      {SELECTABLE_LUNCH_CHOICES.map((choice) => {
-        const isSelected = current === choice;
-        const isPending = pending === choice;
-        // Marked, but not what the server holds: picked and not yet submitted.
-        const isUnsent = isSelected && saved !== choice;
+      <p className="meal-rule" role="note">
+        The default meal is <strong>Option 1</strong>
+        {option1 ? ` (${option1})` : ''}. If you do not check Option 2, you will be served
+        Option 1.
+      </p>
 
-        return (
-          <label
-            key={choice}
-            className={`choice ${isSelected ? 'choice--selected' : ''} ${isUnsent ? 'choice--unsent' : ''} ${isPending ? 'choice--pending' : ''}`}
-          >
-            <input
-              type="radio"
-              name="lunch-choice"
-              value={choice}
-              className="choice__input"
-              checked={isSelected}
-              disabled={disabled}
-              onChange={() => onSelect(choice)}
-            />
-            <span className="choice__body">
-              <span className="choice__label">{CHOICE_LABELS[choice]}</span>
-              {optionNames[choice] && <span className="choice__dish">{optionNames[choice]}</span>}
-            </span>
-            <span className="choice__state" aria-hidden="true">
-              {isPending ? '…' : isSelected ? '✓' : ''}
-            </span>
-            {isSelected && (
-              <span className="sr-only">{isUnsent ? 'Chosen, not submitted yet' : 'Selected'}</span>
-            )}
-          </label>
-        );
-      })}
-    </fieldset>
+      <label
+        className={`choice choice--check ${wantsOption2 ? 'choice--selected' : ''} ${isUnsent ? 'choice--unsent' : ''} ${pending ? 'choice--pending' : ''}`}
+      >
+        <input
+          type="checkbox"
+          className="choice__checkbox"
+          checked={wantsOption2}
+          disabled={disabled}
+          onChange={(e) => onSelect(e.target.checked ? 'option_2' : 'option_1')}
+        />
+        <span className="choice__body">
+          <span className="choice__label">I want Option 2 instead</span>
+          {optionNames.option_2 && <span className="choice__dish">{optionNames.option_2}</span>}
+        </span>
+        {isUnsent && <span className="sr-only">Not submitted yet</span>}
+      </label>
+    </section>
   );
 }

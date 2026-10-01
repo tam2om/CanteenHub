@@ -122,10 +122,10 @@ export interface LunchReport {
      */
     defaulted_to_option_1: number;
     /**
-     * Healthy-meal employees who are eligible but did NOT submit for this date
-     * - on leave, say. No portion is prepared for them; this says how many
-     * there are, so the numbers reconcile and a missing confirmation can be
-     * chased before the kitchen closes.
+     * Healthy-meal employees who did NOT reserve this date by submitting. They
+     * are served Option 1 and are already inside both `option_1` and
+     * `defaulted_to_option_1`; this says how many of those are healthy-meal
+     * people, so a missing reservation can be chased before the cutoff.
      */
     healthy_not_confirmed: number;
     /**
@@ -170,18 +170,17 @@ type ReportEmployee = Pick<
  * behind both the totals and the per-person Excel sheet, so the two can never
  * disagree.
  *
- * HEALTHY-MEAL EMPLOYEES MUST CONFIRM. A healthy meal is prepared individually,
- * so it is counted only when the employee has actually submitted for that day
- * - one who is on leave, travelling or off sick simply does not submit, and no
- * portion is made for them. The first version counted every healthy-meal
- * employee every day they were eligible, which cooked meals for people who were
- * not there. Once they HAVE submitted, it is `healthy` whatever the row says,
- * because the meal type is a property of the person, not of the request.
+ * OPTION 1 IS EVERYONE'S DEFAULT. Every eligible employee is served exactly one
+ * meal; what they get depends on what they submitted for that date:
  *
- * Everyone else:
- *   1. Whatever they chose.
- *   2. Option 1 if they chose nothing - not choosing is not a reason to go
- *      hungry, and the menu portions are cooked in bulk anyway.
+ *   - nothing submitted          -> Option 1
+ *   - submitted, ordinary        -> what they submitted (Option 2, or Option 1)
+ *   - submitted, healthy meal    -> the healthy meal, whatever the row says
+ *
+ * A healthy-meal employee therefore has to RESERVE the day by submitting; one
+ * who does not is served Option 1 like anybody else who said nothing. (An
+ * earlier version served them nothing at all; the business rule is that
+ * nobody entitled to lunch goes without one.)
  *
  * ONLY WHEN LUNCH IS BEING SERVED. With no published menu there is no Option 1
  * to cook, and counting a default portion of it would fabricate a number the
@@ -194,9 +193,8 @@ export function servedMeal(
   choice: LunchChoice | null,
   menuPublished: boolean
 ): LunchChoice | null {
-  if (preference === 'healthy') return choice === null ? null : 'healthy';
-  if (choice === null && !menuPublished) return null;
-  return choice ?? DEFAULT_LUNCH_CHOICE;
+  if (choice === null) return menuPublished ? DEFAULT_LUNCH_CHOICE : null;
+  return preference === 'healthy' ? 'healthy' : choice;
 }
 
 /**
@@ -302,23 +300,21 @@ export async function buildLunchReport(
     const bucket = byLocation.get(location) ?? byLocation.get(DEFAULT_MEAL_LOCATION)!;
 
     // WHAT THIS PERSON IS COOKED FOR - see `servedMeal`. When lunch is being
-    // served, every eligible employee contributes exactly one portion, except
-    // a healthy-meal employee who has not confirmed the day - they get none.
+    // served, every eligible employee contributes exactly one portion, which
+    // is what makes `total` a number the kitchen can load a trolley from.
     const served = servedMeal(employee.meal_preference, choice, menuPublished);
-    if (served === null) {
-      if (employee.meal_preference === 'healthy' && choice === null) {
-        healthyNotConfirmed += 1;
-      }
-      continue;
-    }
+    if (served === null) continue;
 
     counts[served] += 1;
     bucket[served] += 1;
     bucket.total += 1;
 
-    if (choice === null && employee.meal_preference !== 'healthy') {
+    // Served the default because nothing was submitted - including a
+    // healthy-meal employee who did not reserve the day.
+    if (choice === null) {
       defaultedToOption1 += 1;
       bucket.defaulted_to_option_1 += 1;
+      if (employee.meal_preference === 'healthy') healthyNotConfirmed += 1;
     }
   }
 

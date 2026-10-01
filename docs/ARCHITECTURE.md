@@ -107,7 +107,7 @@ Route                     Bundle          Audience
 The requirement is "a few seconds." The home route must render the decision in one viewport with no scrolling on a typical phone:
 
 1. The date being ordered — **tomorrow**, or the day after once today's cutoff has passed (lunch is ordered a day ahead) — and both meal options, with the common components (condiment, beverage, dessert) shown as informational text under them.
-2. Two large tap targets: **Option 1** and **Option 2**, with Option 1 pre-marked because it is what an employee who says nothing is served. *(Migration 0005 removed the original third target, No Preference — see "Superseded" below.)* An employee an administrator has put on the **healthy meal** sees that meal fixed instead of the options.
+2. A statement that **Option 1 is the default**, and a single **"I want Option 2"** checkbox — Option 2 is the only thing an employee opts into. *(Migration 0005 removed the original third target, No Preference — see "Superseded" below.)* An employee an administrator has put on the **healthy meal** sees that meal fixed instead of the options.
 2a. A required **Collect from** canteen, never pre-filled.
 3. Current selection state and the cutoff time ("You can change this until 10:00").
 4. If not eligible: no tap targets at all, replaced by a plain-language explanation and the next eligible date.
@@ -1542,8 +1542,12 @@ of why it was built that way. Four rules have since changed:
   count were defaults ("of which not chosen"). The default applies only when a
   menu is **published** — with no menu there is no Option 1 to cook.
 - **The healthy meal** is set on the employee (`employees.meal_preference`) by an
-  administrator. The server records `healthy` for them whatever the request asks,
-  and they cannot change it themselves; the report gives it its own column.
+  administrator. The employee must **reserve** it by submitting for each date;
+  the server records `healthy` for them whatever the request asks. One who does
+  not reserve is served **Option 1** like anyone else who said nothing, and the
+  report counts how many did not ("Healthy meal not reserved"). The portal
+  offers ordinary employees a single Option 2 checkbox under an "Option 1 is the
+  default" statement.
 - **Lunch is ordered a day ahead.** The deadline for a meal on date D is the
   cutoff on D−1, so today's lunch is always closed; the portal offers tomorrow
   before the cutoff and the day after once it passes. The collection canteen is

@@ -252,6 +252,23 @@ a:hover { color: var(--navy); }
 .choice--fixed:hover { border-color: var(--accent); }
 
 .choice--unsent { border-style: dashed; }
+
+/* The default-meal statement: the first thing an employee reads, because it
+   is what happens if they do nothing at all. */
+.meal-rule {
+  margin: 0 0 0.875rem; padding: 0.75rem 0.875rem;
+  border-left: 3px solid var(--accent); border-radius: 6px;
+  background: var(--accent-soft); color: var(--text); font-size: 0.9375rem;
+}
+
+/* Option 2 is a real, visible checkbox - unlike the radios it replaced, the
+   box itself is the control, so it is shown rather than hidden. */
+.choice__checkbox {
+  flex: none; width: 1.375rem; height: 1.375rem; margin: 0;
+  accent-color: var(--accent); cursor: pointer;
+}
+.choice__checkbox:disabled { cursor: not-allowed; }
+.choice--check:has(.choice__checkbox:focus-visible) { outline: 3px solid var(--accent); outline-offset: 2px; }
 .choice--unsent .choice__state { background: transparent; color: var(--accent); border: 2px solid var(--accent); }
 
 .actions { display: flex; margin-top: 1rem; }

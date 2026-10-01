@@ -310,7 +310,7 @@ describe('Meal collection points', () => {
       expect(whcRow[4]).toBe('1'); // and it IS a portion to send
     });
 
-    it('an UNCONFIRMED healthy meal is not prepared, and the sheet says how many', async () => {
+    it('a healthy-meal employee who did not reserve is served Option 1, and the sheet says how many', async () => {
       await seedEmployee(db, {
         amcoId: 'TEST631',
         defaultLocation: 'whc_canteen',
@@ -322,9 +322,10 @@ describe('Meal collection points', () => {
       const rows = sheet.rows.map((r) => [...r.cells.values()]);
 
       const whcRow = rows.find((r) => r[0] === 'WHC Canteen')!;
-      expect(whcRow[3]).toBe('0');
-      expect(whcRow[4]).toBe('0');
-      expect(rows.find((r) => r[0] === 'Healthy meal not confirmed (not prepared)')![1]).toBe('1');
+      expect(whcRow[1]).toBe('1'); // Option 1 - the default
+      expect(whcRow[3]).toBe('0'); // no healthy meal
+      expect(whcRow[4]).toBe('1'); // still one portion to send
+      expect(rows.find((r) => r[0] === 'Healthy meal not reserved (served Option 1)')![1]).toBe('1');
     });
 
     it('the Detail sheet says what is served AND whether it was chosen', async () => {
@@ -359,14 +360,13 @@ describe('Meal collection points', () => {
 
       const healthy = rows.find((r) => r[0] === 'TEST650')!;
       expect(healthy[7]).toBe('Healthy meal');
-      expect(healthy[8]).toBe('Healthy meal (confirmed)');
+      expect(healthy[8]).toBe('Healthy meal (reserved)');
 
-      // Eligible, on the healthy meal, never confirmed: nothing served, and the
-      // row says why rather than looking like an oversight. Matched as whole
-      // cells, since an empty "Served" cell may not be written at all.
-      const unconfirmed = rows.find((r) => r[0] === 'TEST660')!;
-      expect(unconfirmed).toContain('Healthy meal - NOT confirmed');
-      expect(unconfirmed).not.toContain('Healthy meal');
+      // Eligible, on the healthy meal, never reserved: served Option 1, and
+      // the row says why, so the kitchen can see it was not their choice.
+      const unreserved = rows.find((r) => r[0] === 'TEST660')!;
+      expect(unreserved[7]).toBe('Option 1');
+      expect(unreserved[8]).toBe('Healthy meal - NOT reserved');
     });
 
     it('exports a date with no menu without failing', async () => {
