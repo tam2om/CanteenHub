@@ -10,7 +10,6 @@ interface Props {
   eligibility: Eligibility;
   cutoffPassed: boolean;
   orderingOpen: boolean;
-  orderingOpensOn: string;
   cutoffTime: string;
   hasMenu: boolean;
 }
@@ -19,7 +18,6 @@ export function EligibilityStatus({
   eligibility,
   cutoffPassed,
   orderingOpen,
-  orderingOpensOn,
   cutoffTime,
   hasMenu,
 }: Props) {
@@ -39,14 +37,6 @@ export function EligibilityStatus({
       {eligible && orderingOpen && (
         <p className="status__detail">
           Ordering is open until <strong>{formatTimeOfDay(cutoffTime)}</strong> today.
-        </p>
-      )}
-
-      {eligible && !orderingOpen && !cutoffPassed && (
-        <p className="status__detail">
-          Ordering for this date opens at 12:00 AM on{' '}
-          <strong>{formatBusinessDate(orderingOpensOn)}</strong> and closes at{' '}
-          <strong>{formatTimeOfDay(cutoffTime)}</strong> that day.
         </p>
       )}
 
