@@ -230,13 +230,13 @@ describe('Admin report - counts', () => {
     renderWithProviders(<AdminReportsPage />);
 
     expect(
-      await screen.findByText(/who chose nothing is served Option 1/i)
+      await screen.findByText(/Option 1 is everyone’s default/i)
     ).toBeInTheDocument();
     expect(screen.getByText(/already inside that number/i)).toBeInTheDocument();
     expect(screen.queryByText('No preference')).not.toBeInTheDocument();
   });
 
-  it('says how many healthy-meal employees have not confirmed, and that none is prepared', async () => {
+  it('says how many healthy-meal employees have not reserved, and that they get Option 1', async () => {
     stubFetch(
       routes({
         [REPORT]: ok(
@@ -252,7 +252,7 @@ describe('Admin report - counts', () => {
     renderWithProviders(<AdminReportsPage />);
 
     expect(
-      await screen.findByText(/2 healthy-meal employees have not confirmed this date/i)
+      await screen.findByText(/2 healthy-meal employees have not reserved this date and will be served Option 1/i)
     ).toBeInTheDocument();
   });
 
@@ -260,7 +260,7 @@ describe('Admin report - counts', () => {
     stubFetch(routes());
     renderWithProviders(<AdminReportsPage />);
     await screen.findByRole('heading', { name: 'Portions to prepare' });
-    expect(screen.queryByText(/have not confirmed|has not confirmed/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/have not reserved|has not reserved/i)).not.toBeInTheDocument();
   });
 
   it('surfaces selections held by now-ineligible employees', async () => {

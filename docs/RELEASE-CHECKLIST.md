@@ -66,7 +66,7 @@ Run `SMOKE-TESTS.md` in full. At minimum:
 - [ ] **Reload** — log in, then reload a deep link. You must stay logged in.
       (This broke in Phase 7: `/api/auth/me` answered 401 to a valid cookie.)
 - [ ] **Logout** — returns to login, and a protected route then bounces
-- [ ] **Employee** — tomorrow's menu, Option 1 / Option 2 (Option 1 pre-marked),
+- [ ] **Employee** — tomorrow's menu, the Option 1 default statement and Option 2 checkbox,
       canteen required before Submit, change a selection, history shows the
       change, profile loads; a Healthy-meal employee sees no options
 - [ ] **Admin** — employees list and edit, set a password (old one stops working

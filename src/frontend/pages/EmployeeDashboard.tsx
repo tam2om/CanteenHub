@@ -176,24 +176,6 @@ export function EmployeeDashboard() {
             locked={choiceLocked}
           />
 
-          {!choiceLocked && selection === null && (
-            <p className="panel__note">
-              Option 1 is what you get if you submit nothing at all. Choosing is still worth it —
-              it tells the kitchen this is a real order.
-            </p>
-          )}
-
-          {/* The opposite rule for the healthy meal: it is prepared one by one,
-              so it is only made for someone who confirms the day. Said as a
-              warning, because the cost of missing it is no lunch. */}
-          {choiceLocked && selection === null && (
-            <p className="feedback feedback--warn" role="note">
-              Your healthy meal is prepared only if you submit for this date. Choose where you will
-              collect it and press &ldquo;Submit my choice&rdquo; — if you don&rsquo;t (for example,
-              when you&rsquo;re on leave), no meal is prepared for you.
-            </p>
-          )}
-
           {/* Where to collect it. Required, and deliberately empty until the
               employee picks: this is the one thing the kitchen cannot work out
               for itself. Like the meal, a change here is only marked until

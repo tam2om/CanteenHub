@@ -45,12 +45,13 @@ Precondition: a **published** menu for today and an eligible employee.
 | # | Step | Expected |
 |---|---|---|
 | 2.1 | Open the portal | ✅ **tomorrow's** menu (the day after, once today's cutoff has passed), "Lunch for …" and "Today is …" both shown |
-| 2.2 | Look at the choices | ✅ exactly **two** — Option 1 and Option 2; Option 1 already marked, with a note that it is what you get if you submit nothing |
-| 2.3 | Choose Option 2 without a canteen | ✅ Submit stays disabled; "Choose where you will collect this meal" shown — ❌ never pre-filled |
+| 2.2 | Look at the choices | ✅ the statement "The default meal is Option 1 … If you do not check Option 2, you will be served Option 1." and **one unchecked Option 2 checkbox** — ❌ no radio buttons |
+| 2.3 | Check Option 2 without a canteen | ✅ Submit stays disabled; "Choose where you will collect this meal" shown — ❌ never pre-filled |
 | 2.4 | Choose a canteen, then Submit | ✅ "Submitted. You are down for Option 2 at … Canteen." |
-| 2.5 | Re-pick the option already saved | ✅ Submit disabled — nothing to send |
+| 2.5 | Tick then untick back to what is saved | ✅ Submit disabled — nothing to send |
 | 2.6 | Try to order **today's** lunch (API) | ✅ refused: "Lunch is chosen a day ahead" |
-| 2.6a | As an employee an admin set to **Healthy meal** | ✅ "Healthy meal — set for you by an administrator"; no options offered; canteen still chosen and submitted |
+| 2.6a | As an employee an admin set to **Healthy meal** | ✅ statement "To reserve it … press Submit. If you do not submit, you will be served Option 1"; no checkbox; "Not reserved yet." until submitted, then "Reserved for this date." |
+| 2.6b | Report for a date a healthy-meal employee did not reserve | ✅ counted as **Option 1**, and "not reserved" noted on the report and in the Excel |
 | 2.7 | As an Amman HQ employee | ✅ ineligible, reason shown |
 | 2.8 | As a shift employee rostered **off** | ✅ ineligible |
 | 2.9 | As a shift employee with **no roster** | ✅ "roster not published" — ❌ never shown as "off" |

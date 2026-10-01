@@ -246,21 +246,21 @@ describe('Admin lunch report', () => {
     });
 
     /**
-     * The healthy meal is prepared one by one. Someone on it who does not
-     * confirm the day - on leave, travelling, off sick - must NOT have a meal
-     * made for them. The first version counted every healthy-meal employee
-     * every eligible day, and the kitchen cooked for people who were not there.
+     * A healthy-meal employee RESERVES the day by submitting. One who does not
+     * is served Option 1, like anybody else who said nothing - nobody entitled
+     * to lunch goes without. (A previous rule served them nothing; this pins
+     * the rule the business actually wants.)
      */
-    it('does NOT prepare a healthy meal for an employee who did not confirm the day', async () => {
+    it('serves Option 1 to a healthy-meal employee who did not reserve the day', async () => {
       await seedEmployee(db, { amcoId: 'TEST106', rosterType: 'regular', mealPreference: 'healthy' });
 
       const { body } = await report();
       expect(body.selections.healthy).toBe(0);
+      // `employee` and TEST106 both said nothing: two Option 1 defaults ...
+      expect(body.selections.option_1).toBe(2);
+      expect(body.selections.defaulted_to_option_1).toBe(2);
+      // ... one of whom is a healthy-meal employee who did not reserve.
       expect(body.selections.healthy_not_confirmed).toBe(1);
-      // And they are NOT quietly folded into Option 1 instead.
-      expect(body.selections.defaulted_to_option_1).toBe(1); // `employee` only
-      const portions = body.by_location.reduce((sum: number, l: { total: number }) => sum + l.total, 0);
-      expect(portions).toBe(1); // `employee`'s default Option 1, and nothing for TEST106
     });
 
     it('does NOT count ineligible employees at all', async () => {
@@ -289,7 +289,7 @@ describe('Admin lunch report', () => {
       expect(reasonCount(body, 'SHIFT_OFF')).toBe(1);
     });
 
-    it('totals add up: every eligible employee is one portion, or an unconfirmed healthy meal', async () => {
+    it('totals add up: every eligible employee is exactly one portion', async () => {
       for (const id of ['TEST101', 'TEST102', 'TEST103', 'TEST104']) {
         await seedEmployee(db, { amcoId: id, rosterType: 'regular' });
       }
@@ -304,10 +304,11 @@ describe('Admin lunch report', () => {
 
       const { body } = await report();
       const s = body.selections;
-      // TEST105 is on the healthy meal and did not confirm: no portion, but
-      // accounted for - nobody eligible disappears from the arithmetic.
+      // TEST105 is on the healthy meal and did not reserve: served Option 1,
+      // inside both option_1 and the defaulted count.
       expect(s.healthy_not_confirmed).toBe(1);
-      expect(s.option_1 + s.option_2 + s.healthy + s.healthy_not_confirmed).toBe(body.totals.eligible);
+      expect(s.healthy_not_confirmed).toBeLessThanOrEqual(s.defaulted_to_option_1);
+      expect(s.option_1 + s.option_2 + s.healthy).toBe(body.totals.eligible);
       // The defaulted ones are INSIDE option_1, not alongside it.
       expect(s.defaulted_to_option_1).toBeLessThanOrEqual(s.option_1);
       expect(body.totals.eligible + body.totals.not_eligible).toBe(body.totals.employees_considered);
