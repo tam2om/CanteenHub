@@ -1,5 +1,5 @@
 /**
- * Settings: lunch cutoff and company holidays.
+ * Settings: lunch cutoff, the day-shift override, and company holidays.
  *
  * Neither the cutoff nor holiday eligibility is evaluated here. The cutoff is a
  * value stored and interpreted by the server in the configured business
@@ -10,10 +10,12 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import {
   useAddHoliday,
+  useDayShiftOverride,
   useDeleteHoliday,
   useHolidays,
   useSettings,
   useUpdateCutoff,
+  useUpdateDayShiftOverride,
 } from '../../hooks/useAdmin.js';
 import { ApiError } from '../../api/client.js';
 import { EmptyState, ErrorState, LoadingState } from '../../components/States.js';
@@ -34,6 +36,7 @@ export function AdminSettingsPage() {
     <main className="page">
       <h1 className="page__title">Settings</h1>
       <CutoffSection />
+      <DayShiftOverrideSection />
       <HolidaysSection />
     </main>
   );
@@ -132,6 +135,187 @@ function CutoffSection() {
           {saved && !serverError && (
             <p className="feedback feedback--ok" role="status">
               Cutoff updated. It applies immediately.
+            </p>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * "Everyone on day shift" for a period. While it is on, shift employees who
+ * are rostered Off (or have no roster yet) can order a meal for dates inside
+ * the period, exactly as if they were on a day shift. The server applies it
+ * when it decides eligibility and stops applying it after the end date, so
+ * nothing here needs to run on a timer.
+ */
+function DayShiftOverrideSection() {
+  const { data, isLoading, error } = useDayShiftOverride();
+  const update = useUpdateDayShiftOverride();
+
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [clientError, setClientError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  // Seed the period from the server once it arrives; an expired period is
+  // shown too, so it is easy to reuse or adjust.
+  useEffect(() => {
+    if (data) {
+      setStartDate(data.start_date ?? '');
+      setEndDate(data.end_date ?? '');
+    }
+  }, [data]);
+
+  const isOn = data?.state === 'active' || data?.state === 'scheduled';
+
+  const save = (enabled: boolean) => {
+    setClientError(null);
+    setNotice(null);
+
+    if (enabled) {
+      if (!DATE_PATTERN.test(startDate) || !DATE_PATTERN.test(endDate)) {
+        setClientError('Choose both a start date and an end date.');
+        return;
+      }
+      if (startDate > endDate) {
+        setClientError('The end date must be on or after the start date.');
+        return;
+      }
+    }
+
+    update.mutate(
+      enabled ? { enabled, start_date: startDate, end_date: endDate } : { enabled },
+      {
+        onSuccess: (result) =>
+          setNotice(
+            result.state === 'off'
+              ? 'Turned off. Everyone is back on their rostered shift.'
+              : `On from ${formatBusinessDate(result.start_date!)} to ${formatBusinessDate(result.end_date!)}.`
+          ),
+      }
+    );
+  };
+
+  const serverError =
+    update.error instanceof ApiError
+      ? update.error.message
+      : update.error
+        ? 'The setting could not be saved.'
+        : null;
+
+  return (
+    <section className="card">
+      <h2 className="card__title">Everyone on day shift</h2>
+      <p className="panel__note">
+        While this is on, shift employees who are rostered off (or have no roster yet) are treated
+        as on a day shift for meal dates in the period, so they can order a meal. The usual ordering
+        window still applies. After the end date it turns off by itself and everyone goes back to
+        their rostered shift.
+      </p>
+
+      {isLoading && <LoadingState label="Loading setting…" />}
+      {error && (
+        <ErrorState
+          message={error instanceof ApiError ? error.message : 'We could not load this setting.'}
+        />
+      )}
+
+      {data && (
+        <>
+          <p className="setting__current">
+            {data.state === 'active' && (
+              <>
+                <strong>On</strong> until {formatBusinessDate(data.end_date!)}
+              </>
+            )}
+            {data.state === 'scheduled' && (
+              <>
+                <strong>Scheduled</strong> from {formatBusinessDate(data.start_date!)} to{' '}
+                {formatBusinessDate(data.end_date!)}
+              </>
+            )}
+            {data.state === 'expired' && (
+              <>
+                <strong>Off</strong>: the period ended on {formatBusinessDate(data.end_date!)}
+              </>
+            )}
+            {data.state === 'off' && <strong>Off</strong>}
+          </p>
+
+          <form
+            noValidate
+            className="setting__form"
+            onSubmit={(event: FormEvent) => {
+              event.preventDefault();
+              save(true);
+            }}
+          >
+            <label className="field field--inline field--narrow">
+              <span className="field__label">From</span>
+              <input
+                className="field__input"
+                name="override_start_date"
+                type="date"
+                value={startDate}
+                onChange={(e) => {
+                  setStartDate(e.target.value);
+                  setNotice(null);
+                }}
+              />
+            </label>
+
+            <label className="field field--inline field--narrow">
+              <span className="field__label">To</span>
+              <input
+                className="field__input"
+                name="override_end_date"
+                type="date"
+                value={endDate}
+                min={startDate || undefined}
+                onChange={(e) => {
+                  setEndDate(e.target.value);
+                  setNotice(null);
+                }}
+              />
+            </label>
+
+            <label className="switch">
+              <input
+                className="switch__input"
+                type="checkbox"
+                role="switch"
+                aria-label="Treat everyone as day shift"
+                checked={isOn}
+                disabled={update.isPending}
+                onChange={(e) => save(e.target.checked)}
+              />
+              <span className="switch__track" aria-hidden="true" />
+              {isOn ? 'On' : 'Off'}
+            </label>
+
+            {isOn && (
+              <button
+                type="submit"
+                className="button button--ghost button--inline"
+                disabled={update.isPending}
+              >
+                {update.isPending ? 'Saving…' : 'Update period'}
+              </button>
+            )}
+          </form>
+
+          {(clientError || serverError) && (
+            <p className="feedback feedback--error" role="alert">
+              {clientError ?? serverError}
+            </p>
+          )}
+          {notice && !serverError && (
+            <p className="feedback feedback--ok" role="status">
+              {notice}
             </p>
           )}
         </>

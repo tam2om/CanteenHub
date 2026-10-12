@@ -68,6 +68,7 @@ export const ELIGIBILITY_MESSAGES: Record<EligibilityReason, string> = {
   REGULAR_WORKING_DAY: 'You are eligible for lunch on this date.',
   SHIFT_DAY: 'You are on a day shift and eligible for lunch.',
   SHIFT_NIGHT: 'You are on a night shift and eligible for lunch.',
+  SHIFT_DAY_OVERRIDE: 'Everyone is on day shift for this date, so you are eligible for lunch.',
   REGULAR_NON_WORKING_DAY: 'This is not one of your working days, so no meal is provided.',
   SHIFT_OFF: 'You are rostered off, so no meal is provided.',
   ROSTER_MISSING: 'Your shift roster for this date has not been published yet.',

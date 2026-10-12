@@ -12,6 +12,7 @@ import type {
   AdminEmployeeList,
   CreateEmployeeInput,
   EmployeeFilters,
+  DayShiftOverrideStatus,
   Holiday,
   PasswordSetResult,
   Setting,
@@ -60,6 +61,18 @@ export const fetchSettings = () => api.get<Setting[]>('/api/admin/settings');
 
 export const updateCutoff = (cutoffTime: string) =>
   api.put<Setting>('/api/admin/settings/cutoff', { cutoff_time: cutoffTime });
+
+export const fetchDayShiftOverride = () =>
+  api.get<DayShiftOverrideStatus>('/api/admin/settings/day-shift-override');
+
+export interface DayShiftOverrideInput {
+  enabled: boolean;
+  start_date?: string;
+  end_date?: string;
+}
+
+export const updateDayShiftOverride = (input: DayShiftOverrideInput) =>
+  api.put<DayShiftOverrideStatus>('/api/admin/settings/day-shift-override', input);
 
 export const listHolidays = () => api.get<Holiday[]>('/api/admin/holidays');
 

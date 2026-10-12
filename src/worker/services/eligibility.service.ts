@@ -8,10 +8,14 @@
  */
 
 import type { D1Database } from '@cloudflare/workers-types';
-import type { Employee, EligibilityResponse } from '../../shared/types/index.js';
-import { computeEligibility, type EligibilityContext } from '../domain/eligibility.js';
+import type { DayShiftOverride, Employee, EligibilityResponse } from '../../shared/types/index.js';
+import {
+  computeEligibility,
+  isDayShiftOverrideActive,
+  type EligibilityContext,
+} from '../domain/eligibility.js';
 import { getRosterEntry, getFutureEligibleShifts, getPublishedMenuDates } from '../repositories/roster.repo.js';
-import { getSetting, getTimezone } from './settings.service.js';
+import { getDayShiftOverride, getSetting, getTimezone } from './settings.service.js';
 import { getHolidayDateSet } from '../repositories/holidays.repo.js';
 import { getWeekday, type BusinessDate } from '../lib/datetime.js';
 
@@ -21,6 +25,7 @@ export interface EligibilityConfig {
   workingDays: number[];
   holidays: Set<BusinessDate>;
   timezone: string;
+  dayShiftOverride: DayShiftOverride | null;
 }
 
 /**
@@ -47,7 +52,9 @@ export async function loadEligibilityConfig(db: D1Database): Promise<Eligibility
   // denial reason; until now it was simply always given an empty one.
   const holidays = await getHolidayDateSet(db);
 
-  return { workingDays, holidays, timezone };
+  const dayShiftOverride = await getDayShiftOverride(db);
+
+  return { workingDays, holidays, timezone, dayShiftOverride };
 }
 
 /**
@@ -62,7 +69,7 @@ export async function getEligibilityWithNextDate(
     ? await getRosterEntry(db, employee.id, mealDate)
     : null;
 
-  const { workingDays, holidays } = await loadEligibilityConfig(db);
+  const { workingDays, holidays, dayShiftOverride } = await loadEligibilityConfig(db);
 
   const context: EligibilityContext = {
     employee,
@@ -70,6 +77,7 @@ export async function getEligibilityWithNextDate(
     rosterEntry,
     workingDays,
     holidays,
+    dayShiftOverride,
   };
 
   // Pure computation, no I/O.
@@ -78,7 +86,9 @@ export async function getEligibilityWithNextDate(
   if (!baseResult.eligible) {
     return {
       ...baseResult,
-      nextEligibleDate: await findNextEligibleMealDate(db, employee, mealDate, workingDays, holidays),
+      nextEligibleDate: await findNextEligibleMealDate(
+        db, employee, mealDate, workingDays, holidays, dayShiftOverride
+      ),
     };
   }
 
@@ -105,7 +115,8 @@ export async function findNextEligibleMealDate(
   employee: Employee,
   fromDate: BusinessDate,
   workingDays: number[],
-  holidays: Set<BusinessDate>
+  holidays: Set<BusinessDate>,
+  dayShiftOverride: DayShiftOverride | null = null
 ): Promise<BusinessDate | null> {
   // Amman HQ employees never receive a company meal; inactive employees cannot
   // select at all. Neither has a "next" date, and inventing one would be a lie.
@@ -139,19 +150,23 @@ export async function findNextEligibleMealDate(
   }
 
   if (employee.roster_type === 'shift') {
-    // Intersect the employee's actual future Day/Night shifts (ascending) with
-    // the published menu dates. Both sides are real records.
-    const publishedMenuDateSet = new Set(publishedMenuDates);
-    const futureShifts = await getFutureEligibleShifts(db, employee.id, fromDate);
+    // Walk the published menu dates and keep the first one the employee is
+    // rostered Day/Night on, or that the day-shift override covers. Both sides
+    // are real records.
+    const futureShiftDates = new Set(
+      (await getFutureEligibleShifts(db, employee.id, fromDate)).map((shift) => shift.work_date)
+    );
 
-    for (const shift of futureShifts) {
-      if (!publishedMenuDateSet.has(shift.work_date)) {
+    for (const menuDate of publishedMenuDates) {
+      if (menuDate <= fromDate) {
         continue;
       }
-      if (holidays.has(shift.work_date)) {
+      if (holidays.has(menuDate)) {
         continue;
       }
-      return shift.work_date;
+      if (futureShiftDates.has(menuDate) || isDayShiftOverrideActive(dayShiftOverride, menuDate)) {
+        return menuDate;
+      }
     }
     return null;
   }
