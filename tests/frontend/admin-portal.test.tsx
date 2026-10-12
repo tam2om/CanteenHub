@@ -30,6 +30,8 @@ const ME = '/api/auth/me';
 const EMPLOYEES = '/api/admin/employees';
 const SETTINGS = '/api/admin/settings';
 const HOLIDAYS = '/api/admin/holidays';
+const DAY_SHIFT_OVERRIDE = '/api/admin/settings/day-shift-override';
+const OVERRIDE_OFF = { enabled: false, start_date: null, end_date: null, state: 'off', today: '2027-03-06' };
 const TODAY = '/api/me/today';
 
 const employeeList = (employees: unknown[], total = employees.length) =>
@@ -717,7 +719,7 @@ describe('Set employee password', () => {
 
 describe('Settings — lunch cutoff', () => {
   it('loads and shows the configured cutoff and timezone', async () => {
-    stubFetch({ [ME]: ok(ADMIN_USER), [SETTINGS]: ok(SETTINGS_ROWS), [HOLIDAYS]: ok([]) });
+    stubFetch({ [ME]: ok(ADMIN_USER), [SETTINGS]: ok(SETTINGS_ROWS), [HOLIDAYS]: ok([]), [DAY_SHIFT_OVERRIDE]: ok(OVERRIDE_OFF) });
 
     renderWithProviders(<AdminSettingsPage />);
 
@@ -730,7 +732,7 @@ describe('Settings — lunch cutoff', () => {
     const fetchSpy = stubFetch({
       [ME]: ok(ADMIN_USER),
       [SETTINGS]: ok(SETTINGS_ROWS),
-      [HOLIDAYS]: ok([]),
+      [HOLIDAYS]: ok([]), [DAY_SHIFT_OVERRIDE]: ok(OVERRIDE_OFF),
       '/api/admin/settings/cutoff': ok({ key: 'lunch_cutoff_time', value: '"14:30"' }),
     });
 
@@ -755,7 +757,7 @@ describe('Settings — lunch cutoff', () => {
     stubFetch({
       [ME]: ok(ADMIN_USER),
       [SETTINGS]: ok(SETTINGS_ROWS),
-      [HOLIDAYS]: ok([]),
+      [HOLIDAYS]: ok([]), [DAY_SHIFT_OVERRIDE]: ok(OVERRIDE_OFF),
       '/api/admin/settings/cutoff': fail(400, 'cutoff_time must be in HH:MM 24-hour format'),
     });
 
@@ -775,7 +777,7 @@ describe('Settings — lunch cutoff', () => {
     stubFetch({
       [ME]: ok(ADMIN_USER),
       [SETTINGS]: ok([{ key: 'lunch_cutoff_time', value: '"07:45"', value_type: 'time' }]),
-      [HOLIDAYS]: ok([]),
+      [HOLIDAYS]: ok([]), [DAY_SHIFT_OVERRIDE]: ok(OVERRIDE_OFF),
     });
 
     renderWithProviders(<AdminSettingsPage />);
@@ -789,6 +791,88 @@ describe('Settings — lunch cutoff', () => {
 // SETTINGS — HOLIDAYS
 // ============================================================================
 
+describe('Settings — Shutdown Exception', () => {
+  it('shows the override as off by default', async () => {
+    stubFetch({ [ME]: ok(ADMIN_USER), [SETTINGS]: ok(SETTINGS_ROWS), [HOLIDAYS]: ok([]), [DAY_SHIFT_OVERRIDE]: ok(OVERRIDE_OFF) });
+
+    renderWithProviders(<AdminSettingsPage />);
+
+    const toggle = await screen.findByRole('switch', { name: 'Shutdown Exception' });
+    expect(toggle).not.toBeChecked();
+  });
+
+  it('turns the override on for the chosen period', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = stubFetch({
+      [ME]: ok(ADMIN_USER),
+      [SETTINGS]: ok(SETTINGS_ROWS),
+      [HOLIDAYS]: ok([]),
+      [`GET ${DAY_SHIFT_OVERRIDE}`]: ok(OVERRIDE_OFF),
+      [`PUT ${DAY_SHIFT_OVERRIDE}`]: ok({
+        enabled: true,
+        start_date: '2027-03-07',
+        end_date: '2027-03-10',
+        state: 'scheduled',
+        today: '2027-03-06',
+      }),
+    });
+
+    renderWithProviders(<AdminSettingsPage />);
+    const toggle = await screen.findByRole('switch', { name: 'Shutdown Exception' });
+
+    await user.type(screen.getByLabelText('From'), '2027-03-07');
+    await user.type(screen.getByLabelText('To'), '2027-03-10');
+    await user.click(toggle);
+
+    await waitFor(() => {
+      const call = fetchSpy.mock.calls.find(([, i]) => (i as RequestInit)?.method === 'PUT');
+      expect(call).toBeDefined();
+      expect(JSON.parse((call![1] as RequestInit).body as string)).toEqual({
+        enabled: true,
+        start_date: '2027-03-07',
+        end_date: '2027-03-10',
+      });
+    });
+    expect(await screen.findByRole('switch', { name: 'Shutdown Exception' })).toBeChecked();
+  });
+
+  it('asks for both dates before turning it on', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = stubFetch({
+      [ME]: ok(ADMIN_USER),
+      [SETTINGS]: ok(SETTINGS_ROWS),
+      [HOLIDAYS]: ok([]),
+      [DAY_SHIFT_OVERRIDE]: ok(OVERRIDE_OFF),
+    });
+
+    renderWithProviders(<AdminSettingsPage />);
+    await user.click(await screen.findByRole('switch', { name: 'Shutdown Exception' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Choose both a start date and an end date.');
+    expect(fetchSpy.mock.calls.some(([, i]) => (i as RequestInit)?.method === 'PUT')).toBe(false);
+  });
+
+  it('shows an expired period as off', async () => {
+    stubFetch({
+      [ME]: ok(ADMIN_USER),
+      [SETTINGS]: ok(SETTINGS_ROWS),
+      [HOLIDAYS]: ok([]),
+      [DAY_SHIFT_OVERRIDE]: ok({
+        enabled: true,
+        start_date: '2027-03-01',
+        end_date: '2027-03-03',
+        state: 'expired',
+        today: '2027-03-06',
+      }),
+    });
+
+    renderWithProviders(<AdminSettingsPage />);
+
+    expect(await screen.findByRole('switch', { name: 'Shutdown Exception' })).not.toBeChecked();
+    expect(screen.getByText(/the period ended on/)).toBeInTheDocument();
+  });
+});
+
 describe('Settings — holidays', () => {
   const HOLIDAY_ROWS = [
     { holiday_date: '2027-03-07', name: 'Independence Day' },
@@ -796,7 +880,7 @@ describe('Settings — holidays', () => {
   ];
 
   it('lists configured holidays', async () => {
-    stubFetch({ [ME]: ok(ADMIN_USER), [SETTINGS]: ok(SETTINGS_ROWS), [HOLIDAYS]: ok(HOLIDAY_ROWS) });
+    stubFetch({ [ME]: ok(ADMIN_USER), [SETTINGS]: ok(SETTINGS_ROWS), [HOLIDAYS]: ok(HOLIDAY_ROWS), [DAY_SHIFT_OVERRIDE]: ok(OVERRIDE_OFF) });
 
     renderWithProviders(<AdminSettingsPage />);
 
@@ -806,7 +890,7 @@ describe('Settings — holidays', () => {
   });
 
   it('shows an empty state when none are configured', async () => {
-    stubFetch({ [ME]: ok(ADMIN_USER), [SETTINGS]: ok(SETTINGS_ROWS), [HOLIDAYS]: ok([]) });
+    stubFetch({ [ME]: ok(ADMIN_USER), [SETTINGS]: ok(SETTINGS_ROWS), [HOLIDAYS]: ok([]), [DAY_SHIFT_OVERRIDE]: ok(OVERRIDE_OFF) });
 
     renderWithProviders(<AdminSettingsPage />);
     expect(await screen.findByText('No company holidays are configured.')).toBeInTheDocument();
@@ -817,7 +901,7 @@ describe('Settings — holidays', () => {
     const fetchSpy = stubFetch({
       [ME]: ok(ADMIN_USER),
       [SETTINGS]: ok(SETTINGS_ROWS),
-      [HOLIDAYS]: ok([]),
+      [HOLIDAYS]: ok([]), [DAY_SHIFT_OVERRIDE]: ok(OVERRIDE_OFF),
     });
 
     renderWithProviders(<AdminSettingsPage />);
@@ -842,7 +926,7 @@ describe('Settings — holidays', () => {
     stubFetch({
       [ME]: ok(ADMIN_USER),
       [SETTINGS]: ok(SETTINGS_ROWS),
-      [HOLIDAYS]: ok(HOLIDAY_ROWS),
+      [HOLIDAYS]: ok(HOLIDAY_ROWS), [DAY_SHIFT_OVERRIDE]: ok(OVERRIDE_OFF),
     });
 
     renderWithProviders(<AdminSettingsPage />);
@@ -860,7 +944,7 @@ describe('Settings — holidays', () => {
     const fetchSpy = stubFetch({
       [ME]: ok(ADMIN_USER),
       [SETTINGS]: ok(SETTINGS_ROWS),
-      [HOLIDAYS]: ok([]),
+      [HOLIDAYS]: ok([]), [DAY_SHIFT_OVERRIDE]: ok(OVERRIDE_OFF),
     });
 
     renderWithProviders(<AdminSettingsPage />);
@@ -892,7 +976,7 @@ describe('Settings — holidays', () => {
     const fetchSpy = stubFetch({
       [ME]: ok(ADMIN_USER),
       [SETTINGS]: ok(SETTINGS_ROWS),
-      [HOLIDAYS]: ok(HOLIDAY_ROWS),
+      [HOLIDAYS]: ok(HOLIDAY_ROWS), [DAY_SHIFT_OVERRIDE]: ok(OVERRIDE_OFF),
     });
 
     renderWithProviders(<AdminSettingsPage />);
@@ -910,7 +994,7 @@ describe('Settings — holidays', () => {
     const fetchSpy = stubFetch({
       [ME]: ok(ADMIN_USER),
       [SETTINGS]: ok(SETTINGS_ROWS),
-      [HOLIDAYS]: ok(HOLIDAY_ROWS),
+      [HOLIDAYS]: ok(HOLIDAY_ROWS), [DAY_SHIFT_OVERRIDE]: ok(OVERRIDE_OFF),
       '/api/admin/holidays/2027-03-07': ok({ message: 'Holiday removed' }),
     });
 

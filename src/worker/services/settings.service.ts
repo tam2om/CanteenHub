@@ -4,7 +4,7 @@
  */
 
 import type { D1Database } from '@cloudflare/workers-types';
-import type { Setting } from '../../shared/types/index.js';
+import type { DayShiftOverride, Setting } from '../../shared/types/index.js';
 import {
   DEFAULT_TIMEZONE,
   addBusinessDays,
@@ -98,6 +98,31 @@ export async function getCurrentBusinessDate(
   now: Date = new Date()
 ): Promise<BusinessDate> {
   return getBusinessDate(await getTimezone(db), now);
+}
+
+/** The settings key the day-shift override is stored under (JSON). */
+export const DAY_SHIFT_OVERRIDE_KEY = 'day_shift_override';
+
+const DAY_SHIFT_OVERRIDE_OFF: DayShiftOverride = { enabled: false, start_date: null, end_date: null };
+
+/**
+ * The day-shift override as stored. A missing or malformed value reads as off,
+ * so a bad row can never make everyone eligible by accident.
+ */
+export async function getDayShiftOverride(db: D1Database): Promise<DayShiftOverride> {
+  const setting = await getSetting(db, DAY_SHIFT_OVERRIDE_KEY);
+  if (!setting) {
+    return DAY_SHIFT_OVERRIDE_OFF;
+  }
+  try {
+    const parsed = JSON.parse(setting.value) as Partial<DayShiftOverride> | null;
+    const start = typeof parsed?.start_date === 'string' ? parsed.start_date : null;
+    const end = typeof parsed?.end_date === 'string' ? parsed.end_date : null;
+    return { enabled: parsed?.enabled === true && start !== null && end !== null, start_date: start, end_date: end };
+  } catch {
+    console.error('Invalid day_shift_override setting; treating it as off.');
+    return DAY_SHIFT_OVERRIDE_OFF;
+  }
 }
 
 /**

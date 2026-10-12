@@ -5,6 +5,8 @@
  * Rules:
  * - Regular employees: Sunday-Thursday eligible, Friday-Saturday not eligible
  * - Shift employees: Day/Night eligible, Off not eligible, missing roster = not eligible
+ *   (unless the Settings Shutdown Exception (day-shift override) covers the date: then Off and
+ *   missing roster are treated as a day shift)
  * - Amman HQ: Never eligible
  * - Inactive employees: Never eligible
  *
@@ -16,7 +18,13 @@
  * search horizon this design removes.
  */
 
-import type { Employee, RosterEntry, EligibilityResponse } from '../../shared/types/index.js';
+import type {
+  Employee,
+  RosterEntry,
+  EligibilityResponse,
+  DayShiftOverride,
+  DayShiftOverrideState,
+} from '../../shared/types/index.js';
 import { getWeekday } from '../lib/datetime.js';
 
 export interface EligibilityContext {
@@ -25,6 +33,37 @@ export interface EligibilityContext {
   rosterEntry: RosterEntry | null;
   workingDays: number[]; // 0=Sunday, 6=Saturday
   holidays: Set<string>; // Set of YYYY-MM-DD strings
+  /** The Settings Shutdown Exception (day-shift override); absent or null means it is off. */
+  dayShiftOverride?: DayShiftOverride | null;
+}
+
+/**
+ * Does the day-shift override cover this meal date? Only when it is switched
+ * on and the date falls inside its period, both ends inclusive. A date after
+ * the end date is not covered, which is what makes the toggle "turn itself
+ * off" without anything having to run on a timer.
+ */
+export function isDayShiftOverrideActive(
+  override: DayShiftOverride | null | undefined,
+  mealDate: string
+): boolean {
+  if (!override || !override.enabled || !override.start_date || !override.end_date) {
+    return false;
+  }
+  return override.start_date <= mealDate && mealDate <= override.end_date;
+}
+
+/** Where the override stands relative to today's business date. */
+export function dayShiftOverrideState(
+  override: DayShiftOverride | null | undefined,
+  today: string
+): DayShiftOverrideState {
+  if (!override || !override.enabled || !override.start_date || !override.end_date) {
+    return 'off';
+  }
+  if (today > override.end_date) return 'expired';
+  if (today < override.start_date) return 'scheduled';
+  return 'active';
 }
 
 /**
@@ -85,6 +124,20 @@ export function computeEligibility(context: EligibilityContext): EligibilityResp
   
   // 5. Shift employees: check roster entry
   if (employee.roster_type === 'shift') {
+    // The Settings override turns the refusals (Off, no roster) into a day
+    // shift for dates inside its period. Day and Night are already eligible
+    // and keep their rostered value.
+    const rosteredOn = rosterEntry?.shift_value === 'day' || rosterEntry?.shift_value === 'night';
+    if (!rosteredOn && isDayShiftOverrideActive(context.dayShiftOverride, mealDate)) {
+      return {
+        eligible: true,
+        reason: 'SHIFT_DAY_OVERRIDE',
+        rosterType: employee.roster_type,
+        dailyStatus: 'day',
+        nextEligibleDate: null,
+      };
+    }
+
     if (!rosterEntry) {
       return {
         eligible: false,

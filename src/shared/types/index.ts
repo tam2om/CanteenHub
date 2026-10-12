@@ -238,7 +238,8 @@ export interface LunchSelectionHistory {
 export type EligibilityReason = 
   | 'REGULAR_WORKING_DAY'
   | 'SHIFT_DAY'
-  | 'SHIFT_NIGHT';
+  | 'SHIFT_NIGHT'
+  | 'SHIFT_DAY_OVERRIDE';
 
 export type EligibilityDenialReason =
   | 'EMPLOYEE_INACTIVE'
@@ -265,6 +266,25 @@ export interface EligibilityDenialResult {
 }
 
 export type EligibilityResponse = EligibilityResult | EligibilityDenialResult;
+
+/**
+ * The "everyone on day shift" override, set from the admin Settings page.
+ *
+ * While enabled, every shift employee who would otherwise be refused on a meal
+ * date inside [start_date, end_date] (rostered Off, or no roster entry) is
+ * treated as on a day shift for that date. Both dates are inclusive business
+ * dates in the company timezone. Nothing is written to the roster: the override
+ * is applied when eligibility is computed, so once the period ends, or the
+ * toggle is switched off, everyone is back on their rostered shift.
+ */
+export interface DayShiftOverride {
+  enabled: boolean;
+  start_date: string | null;
+  end_date: string | null;
+}
+
+/** Where the override stands today: switched off, waiting to start, running, or past its end date. */
+export type DayShiftOverrideState = 'off' | 'scheduled' | 'active' | 'expired';
 
 // ============================================================================
 // SETTINGS

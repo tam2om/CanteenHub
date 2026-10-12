@@ -15,6 +15,7 @@
  */
 
 import { Hono } from 'hono';
+import type { D1Database } from '@cloudflare/workers-types';
 import type { Env, Variables } from '../types/env.js';
 import { requireAuth, requireRole } from '../middleware/session.js';
 import {
@@ -30,7 +31,16 @@ import { hashPassword } from '../lib/auth.js';
 import { validatePassword } from '../lib/password.js';
 import { toPublicEmployee, toPublicEmployees } from '../lib/employeeView.js';
 import { isValidBusinessDate } from '../lib/datetime.js';
-import { getAllSettings, getCurrentBusinessDate, getSetting, updateSetting } from '../services/settings.service.js';
+import {
+  DAY_SHIFT_OVERRIDE_KEY,
+  getAllSettings,
+  getCurrentBusinessDate,
+  getDayShiftOverride,
+  getSetting,
+  updateSetting,
+} from '../services/settings.service.js';
+import { dayShiftOverrideState } from '../domain/eligibility.js';
+import type { DayShiftOverride } from '../../shared/types/index.js';
 import { buildLunchReport, buildLunchReportDetail } from '../services/reports.service.js';
 import {
   isMealLocation,
@@ -544,6 +554,74 @@ app.put('/settings/cutoff', async (c) => {
   );
 
   return c.json({ success: true, data: updated });
+});
+
+/**
+ * The override as the Settings page shows it: the stored value plus where it
+ * stands today. Past its end date it reads as 'expired' and no longer applies.
+ */
+async function dayShiftOverrideStatus(db: D1Database, override?: DayShiftOverride) {
+  const value = override ?? (await getDayShiftOverride(db));
+  const today = await getCurrentBusinessDate(db);
+  return { ...value, state: dayShiftOverrideState(value, today), today };
+}
+
+/**
+ * GET /api/admin/settings/day-shift-override - the "everyone on day shift" toggle
+ */
+app.get('/settings/day-shift-override', async (c) => {
+  return c.json({ success: true, data: await dayShiftOverrideStatus(c.env.DB) });
+});
+
+/**
+ * PUT /api/admin/settings/day-shift-override - switch the override on or off
+ *
+ * Body: { enabled: boolean, start_date?: YYYY-MM-DD, end_date?: YYYY-MM-DD }.
+ * Turning it on needs a period that has not already ended. Turning it off keeps
+ * the last period so the form can show it again. Eligibility reads this on every
+ * request, so the change applies immediately; nothing in the roster is changed.
+ */
+app.put('/settings/day-shift-override', async (c) => {
+  const db = c.env.DB;
+  const actorId = c.get('session')!.employee_id;
+
+  const body = await c.req.json();
+  const { enabled, start_date, end_date } = body ?? {};
+
+  if (typeof enabled !== 'boolean') {
+    return c.json({ success: false, error: 'enabled must be true or false' }, 400);
+  }
+
+  const current = await getDayShiftOverride(db);
+  let next: DayShiftOverride;
+
+  if (enabled) {
+    if (!isValidBusinessDate(start_date) || !isValidBusinessDate(end_date)) {
+      return c.json(
+        { success: false, error: 'start_date and end_date must be valid dates in YYYY-MM-DD format' },
+        400
+      );
+    }
+    if (start_date > end_date) {
+      return c.json({ success: false, error: 'The end date must be on or after the start date' }, 400);
+    }
+    if (end_date < (await getCurrentBusinessDate(db))) {
+      return c.json({ success: false, error: 'The end date has already passed' }, 400);
+    }
+    next = { enabled: true, start_date, end_date };
+  } else {
+    next = { enabled: false, start_date: current.start_date, end_date: current.end_date };
+  }
+
+  const previous = await getSetting(db, DAY_SHIFT_OVERRIDE_KEY);
+  const stored = JSON.stringify(next);
+  await updateSetting(db, DAY_SHIFT_OVERRIDE_KEY, stored, 'json', actorId);
+
+  await logSettingsChange(
+    db, actorId, DAY_SHIFT_OVERRIDE_KEY, previous?.value ?? null, stored, clientIp(c)
+  );
+
+  return c.json({ success: true, data: await dayShiftOverrideStatus(db, next) });
 });
 
 // ============================================================================

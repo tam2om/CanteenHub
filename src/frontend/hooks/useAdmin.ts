@@ -12,13 +12,16 @@ import {
   addHoliday,
   createEmployee,
   deleteHoliday,
+  fetchDayShiftOverride,
   fetchSettings,
   listEmployees,
   listHolidays,
   setEmployeePassword,
   setEmployeeStatus,
   updateCutoff,
+  updateDayShiftOverride,
   updateEmployee,
+  type DayShiftOverrideInput,
 } from '../api/adminEndpoints.js';
 import type {
   CreateEmployeeInput,
@@ -28,6 +31,7 @@ import type {
 
 export const ADMIN_EMPLOYEES_KEY = ['admin', 'employees'] as const;
 export const ADMIN_SETTINGS_KEY = ['admin', 'settings'] as const;
+export const ADMIN_DAY_SHIFT_OVERRIDE_KEY = ['admin', 'settings', 'day-shift-override'] as const;
 export const ADMIN_HOLIDAYS_KEY = ['admin', 'holidays'] as const;
 
 /** Server-side search, filter and pagination; the key carries the filters. */
@@ -91,6 +95,22 @@ export function useUpdateCutoff() {
   return useMutation({
     mutationFn: (cutoffTime: string) => updateCutoff(cutoffTime),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ADMIN_SETTINGS_KEY }),
+  });
+}
+
+export function useDayShiftOverride() {
+  return useQuery({
+    queryKey: ADMIN_DAY_SHIFT_OVERRIDE_KEY,
+    queryFn: fetchDayShiftOverride,
+    retry: false,
+  });
+}
+
+export function useUpdateDayShiftOverride() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: DayShiftOverrideInput) => updateDayShiftOverride(input),
+    onSuccess: (data) => queryClient.setQueryData(ADMIN_DAY_SHIFT_OVERRIDE_KEY, data),
   });
 }
 

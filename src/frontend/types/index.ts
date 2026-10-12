@@ -13,6 +13,7 @@ export type EligibilityReason =
   | 'REGULAR_WORKING_DAY'
   | 'SHIFT_DAY'
   | 'SHIFT_NIGHT'
+  | 'SHIFT_DAY_OVERRIDE'
   | 'EMPLOYEE_INACTIVE'
   | 'AMMAN_HQ_NO_MEAL'
   | 'HOLIDAY'
@@ -217,6 +218,16 @@ export interface Setting {
   value_type: string;
   description?: string | null;
   updated_at?: string;
+}
+
+/** GET/PUT /api/admin/settings/day-shift-override */
+export interface DayShiftOverrideStatus {
+  enabled: boolean;
+  start_date: string | null;
+  end_date: string | null;
+  state: 'off' | 'scheduled' | 'active' | 'expired';
+  /** Today's business date in the company timezone, as the server sees it. */
+  today: string;
 }
 
 export interface Holiday {
