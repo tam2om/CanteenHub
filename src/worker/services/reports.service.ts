@@ -61,7 +61,7 @@ export const REASON_LABELS: Record<AnyEligibilityReason, string> = {
   REGULAR_WORKING_DAY: 'Regular employee on a working day',
   SHIFT_DAY: 'Shift employee on a day shift',
   SHIFT_NIGHT: 'Shift employee on a night shift',
-  SHIFT_DAY_OVERRIDE: 'Shift employee treated as day shift (Settings override)',
+  SHIFT_DAY_OVERRIDE: 'Shift employee treated as day shift (Shutdown Exception)',
   REGULAR_NON_WORKING_DAY: 'Regular employee, not a working day',
   SHIFT_OFF: 'Shift employee rostered off',
   ROSTER_MISSING: 'Shift employee with no roster entry for this date',

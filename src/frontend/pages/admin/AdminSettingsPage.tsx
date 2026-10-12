@@ -209,7 +209,7 @@ function DayShiftOverrideSection() {
 
   return (
     <section className="card">
-      <h2 className="card__title">Everyone on day shift</h2>
+      <h2 className="card__title">Shutdown Exception</h2>
       <p className="panel__note">
         While this is on, shift employees who are rostered off (or have no roster yet) are treated
         as on a day shift for meal dates in the period, so they can order a meal. The usual ordering
@@ -288,7 +288,7 @@ function DayShiftOverrideSection() {
                 className="switch__input"
                 type="checkbox"
                 role="switch"
-                aria-label="Treat everyone as day shift"
+                aria-label="Shutdown Exception"
                 checked={isOn}
                 disabled={update.isPending}
                 onChange={(e) => save(e.target.checked)}

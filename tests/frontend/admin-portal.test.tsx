@@ -791,13 +791,13 @@ describe('Settings — lunch cutoff', () => {
 // SETTINGS — HOLIDAYS
 // ============================================================================
 
-describe('Settings — everyone on day shift', () => {
+describe('Settings — Shutdown Exception', () => {
   it('shows the override as off by default', async () => {
     stubFetch({ [ME]: ok(ADMIN_USER), [SETTINGS]: ok(SETTINGS_ROWS), [HOLIDAYS]: ok([]), [DAY_SHIFT_OVERRIDE]: ok(OVERRIDE_OFF) });
 
     renderWithProviders(<AdminSettingsPage />);
 
-    const toggle = await screen.findByRole('switch', { name: 'Treat everyone as day shift' });
+    const toggle = await screen.findByRole('switch', { name: 'Shutdown Exception' });
     expect(toggle).not.toBeChecked();
   });
 
@@ -818,7 +818,7 @@ describe('Settings — everyone on day shift', () => {
     });
 
     renderWithProviders(<AdminSettingsPage />);
-    const toggle = await screen.findByRole('switch', { name: 'Treat everyone as day shift' });
+    const toggle = await screen.findByRole('switch', { name: 'Shutdown Exception' });
 
     await user.type(screen.getByLabelText('From'), '2027-03-07');
     await user.type(screen.getByLabelText('To'), '2027-03-10');
@@ -833,7 +833,7 @@ describe('Settings — everyone on day shift', () => {
         end_date: '2027-03-10',
       });
     });
-    expect(await screen.findByRole('switch', { name: 'Treat everyone as day shift' })).toBeChecked();
+    expect(await screen.findByRole('switch', { name: 'Shutdown Exception' })).toBeChecked();
   });
 
   it('asks for both dates before turning it on', async () => {
@@ -846,7 +846,7 @@ describe('Settings — everyone on day shift', () => {
     });
 
     renderWithProviders(<AdminSettingsPage />);
-    await user.click(await screen.findByRole('switch', { name: 'Treat everyone as day shift' }));
+    await user.click(await screen.findByRole('switch', { name: 'Shutdown Exception' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Choose both a start date and an end date.');
     expect(fetchSpy.mock.calls.some(([, i]) => (i as RequestInit)?.method === 'PUT')).toBe(false);
@@ -868,7 +868,7 @@ describe('Settings — everyone on day shift', () => {
 
     renderWithProviders(<AdminSettingsPage />);
 
-    expect(await screen.findByRole('switch', { name: 'Treat everyone as day shift' })).not.toBeChecked();
+    expect(await screen.findByRole('switch', { name: 'Shutdown Exception' })).not.toBeChecked();
     expect(screen.getByText(/the period ended on/)).toBeInTheDocument();
   });
 });

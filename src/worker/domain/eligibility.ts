@@ -5,7 +5,7 @@
  * Rules:
  * - Regular employees: Sunday-Thursday eligible, Friday-Saturday not eligible
  * - Shift employees: Day/Night eligible, Off not eligible, missing roster = not eligible
- *   (unless the Settings day-shift override covers the date: then Off and
+ *   (unless the Settings Shutdown Exception (day-shift override) covers the date: then Off and
  *   missing roster are treated as a day shift)
  * - Amman HQ: Never eligible
  * - Inactive employees: Never eligible
@@ -33,7 +33,7 @@ export interface EligibilityContext {
   rosterEntry: RosterEntry | null;
   workingDays: number[]; // 0=Sunday, 6=Saturday
   holidays: Set<string>; // Set of YYYY-MM-DD strings
-  /** The Settings day-shift override; absent or null means it is off. */
+  /** The Settings Shutdown Exception (day-shift override); absent or null means it is off. */
   dayShiftOverride?: DayShiftOverride | null;
 }
 
